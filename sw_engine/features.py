@@ -21,6 +21,7 @@ from .connection import (
     get_last_solid_feature_name,
     mm_to_m,
     select_by_id,
+    select_entity,
     set_input_dim_on_create,
 )
 from .primitives import build_sketch_on_plane
@@ -351,7 +352,7 @@ def execute_linear_pattern(model: Any, op: LinearPatternOperation) -> Any:
     return feat
 
 
-def _select_edges_of_last_feature(model: Any, target_feat_name: str) -> None:
+def _select_edges_of_last_feature(model: Any, target_feat_name: str) -> int:
     """Selecciona la última operación 3D y sus aristas para redondeo o chaflán."""
     model.ClearSelection2(True)
     selected_edges = 0
@@ -364,75 +365,82 @@ def _select_edges_of_last_feature(model: Any, target_feat_name: str) -> None:
                     edges = com_call_0(face, "GetEdges")
                     if edges:
                         for edge in edges:
-                            try:
-                                edge.Select2(True, 1)
+                            if select_entity(model, edge, append=True, mark=1):
                                 selected_edges += 1
-                            except Exception:
-                                pass
             break
         feat = com_call_0(feat, "GetNextFeature")
 
     if selected_edges == 0:
         select_by_id(model, target_feat_name, "BODYFEATURE", 0.0, 0.0, 0.0, append=False, mark=1)
+    return selected_edges
 
 
 def execute_fillet(model: Any, op: FilletOperation) -> Any:
     """
-    Ejecuta un redondeo de radio constante (FeatureFillet) sobre las aristas
+    Ejecuta un redondeo de radio constante (IModelDoc2.FeatureFillet) sobre las aristas
     de la última operación 3D creada.
+    Nota: IModelDoc2.FeatureFillet retorna VT_VOID (None en COM), por lo que se verifica
+    su creación comparando la última operación 3D en el FeatureManager.
     """
     target_feat_name, _ = get_last_solid_feature_name(model)
     radius_m = mm_to_m(op.radius_mm)
 
     _select_edges_of_last_feature(model, target_feat_name)
-    feat = model.FeatureFillet(
+    model.FeatureFillet(
         float(radius_m),  # 1. R1: radio en metros
         True,             # 2. Propagate: propagación tangente
         False,            # 3. Ftyp: radio constante
         False,            # 4. VarRadTyp
         0,                # 5. OverflowType (0 = default)
     )
-    if feat is None:
-        model.ClearSelection2(True)
-        select_by_id(model, target_feat_name, "BODYFEATURE", 0.0, 0.0, 0.0, append=False, mark=0)
-        feat = model.FeatureFillet(float(radius_m), True, False, False, 0)
 
-    if feat is None:
+    after_name, after_type = get_last_solid_feature_name(model)
+    if after_name == target_feat_name:
+        model.ClearSelection2(True)
+        select_by_id(model, target_feat_name, "BODYFEATURE", 0.0, 0.0, 0.0, append=False, mark=1)
+        model.FeatureFillet(float(radius_m), True, False, False, 0)
+        after_name, after_type = get_last_solid_feature_name(model)
+
+    if after_name == target_feat_name:
         raise RuntimeError(
             f"Falló FeatureFillet ({op.radius_mm} mm) sobre la operación '{target_feat_name}'."
         )
 
     model.ClearSelection2(True)
-    return feat
+    return after_name
 
 
 def execute_chamfer(model: Any, op: ChamferOperation) -> Any:
     """
-    Ejecuta un chaflán de distancia y ángulo (FeatureChamfer) sobre las aristas
+    Ejecuta un chaflán de distancia y ángulo (IModelDoc2.FeatureChamfer) sobre las aristas
     de la última operación 3D creada.
+    Nota: IModelDoc2.FeatureChamfer retorna VT_VOID (None en COM), por lo que se verifica
+    su creación comparando la última operación 3D en el FeatureManager.
     """
     target_feat_name, _ = get_last_solid_feature_name(model)
     width_m = mm_to_m(op.distance_mm)
     angle_rad = math.radians(float(op.angle_deg))
 
     _select_edges_of_last_feature(model, target_feat_name)
-    feat = model.FeatureChamfer(
+    model.FeatureChamfer(
         float(width_m),    # 1. Width (metros)
         float(angle_rad),  # 2. Angle (radianes)
         False,             # 3. Flip
     )
-    if feat is None:
+
+    after_name, _ = get_last_solid_feature_name(model)
+    if after_name == target_feat_name:
         raise RuntimeError(
             f"Falló FeatureChamfer ({op.distance_mm} mm x {op.angle_deg}°) sobre '{target_feat_name}'."
         )
 
     model.ClearSelection2(True)
-    return feat
+    return after_name
 
 
 def execute_shell(model: Any, op: ShellOperation) -> Any:
     """
-    Ejecuta un vaciado (InsertFeatureShell) sobre el sólido actual, seleccionando
+    Ejecuta un vaciado (IModelDoc2.InsertFeatureShell) sobre el sólido actual, seleccionando
     automáticamente la cara exterior plana cuya normal apunta en la dirección op.open_face.
     """
     direction_vectors: dict[str, tuple[float, float, float]] = {
@@ -445,6 +453,7 @@ def execute_shell(model: Any, op: ShellOperation) -> Any:
     }
     target_vec = direction_vectors.get(op.open_face, (0.0, 1.0, 0.0))
 
+    prev_feat_name, _ = get_last_solid_feature_name(model)
     model.ClearSelection2(True)
     best_face = None
     best_score = -1e9
@@ -483,11 +492,22 @@ def execute_shell(model: Any, op: ShellOperation) -> Any:
             f"No se encontró una cara exterior en dirección '{op.open_face}' para ejecutar el vaciado (shell)."
         )
 
-    best_face.Select2(False, 1)
+    if not select_entity(model, best_face, append=False, mark=1):
+        raise RuntimeError(
+            f"No se pudo seleccionar la cara '{op.open_face}' en SolidWorks para ejecutar el vaciado (shell)."
+        )
+
     thickness_m = mm_to_m(op.thickness_mm)
     model.InsertFeatureShell(float(thickness_m), bool(op.outward))
+
+    after_name, _ = get_last_solid_feature_name(model)
+    if after_name == prev_feat_name:
+        raise RuntimeError(
+            f"Falló InsertFeatureShell (espesor {op.thickness_mm} mm, cara '{op.open_face}')."
+        )
+
     model.ClearSelection2(True)
-    return True
+    return after_name
 
 
 def execute_operation(model: Any, op: OperationType) -> Any:

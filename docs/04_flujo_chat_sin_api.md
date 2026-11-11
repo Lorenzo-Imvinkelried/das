@@ -9,7 +9,7 @@
 ## 2. Componentes Creados
 
 1. **[PROMPT_PARA_CHAT.txt](../PROMPT_PARA_CHAT.txt)** (y sincronizado en **[ai/system_prompt.md](../ai/system_prompt.md)**):
-   * Contiene las reglas geométricas (origen en `(0,0)`, todas las medidas en milímetros, conversión obligatoria de radios `R` a `"diameter"`, secuencia constructiva sustractiva) y la **especificación exacta del esquema JSON** (`part_name`, `operations`, `plane: "Front" | "Top" | "Right"`, `extrude_boss`, `extrude_cut`, `center_rectangle`, `corner_rectangle`, `circle`, `line`).
+   * Contiene las reglas geométricas (origen en `(0,0)`, medidas en milímetros, conversión obligatoria de radios `R` a `"diameter"`, estrategia constructiva 80/20) y la **especificación exacta del esquema JSON** completo: 9 operaciones 3D (`extrude_boss`, `extrude_cut`, `revolve_boss`, `revolve_cut`, `circular_pattern`, `linear_pattern`, `fillet`, `chamfer`, `shell`), soporte de planos desfasados (`plane_offset_mm`), corte bilateral (`both_directions`) y 7 figuras 2D (`center_rectangle`, `corner_rectangle`, `circle`, `line`, `polygon`, `arc`, `slot`).
 2. **[pieza.json](../pieza.json)**:
    * Archivo JSON activo donde se guarda la última pieza validada y ejecutada.
 3. **[main.py](../main.py)**:

@@ -227,6 +227,37 @@ def create_reference_axis(model: Any, axis: str = "Y") -> str:
     return last_axis_name
 
 
+def select_entity(
+    model: Any,
+    entity_obj: Any,
+    append: bool = False,
+    mark: int = 1,
+) -> bool:
+    """
+    Selecciona una entidad geométrica COM (IFace2, IEdge, etc.) en SolidWorks 2018.
+    En late-binding (pywin32), IFace2 e IEdge no exponen directamente IEntity.Select2(),
+    por lo que se utiliza SelectionManager.AddSelectionListObject con CreateSelectData().
+    """
+    if not append:
+        model.ClearSelection2(True)
+
+    try:
+        sel_mgr = model.SelectionManager
+        sel_data = com_call_0(sel_mgr, "CreateSelectData")
+        if sel_data is not None:
+            sel_data.Mark = int(mark)
+            if bool(sel_mgr.AddSelectionListObject(entity_obj, sel_data)):
+                return True
+    except Exception:
+        pass
+
+    # Fallback en caso de que el objeto soporte Select2 directamente (ej. IFeature)
+    try:
+        return bool(entity_obj.Select2(bool(append), int(mark)))
+    except Exception:
+        return False
+
+
 def get_last_solid_feature_name(model: Any) -> tuple[str, str]:
     """
     Recorre el FeatureManager y devuelve (nombre, tipo) de la última operación 3D sólida

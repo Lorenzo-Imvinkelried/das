@@ -11,19 +11,22 @@ Este documento detalla cómo funciona internamente el paquete `sw_engine/` y las
   * Creación de documento de pieza verificando plantilla `.prtdot` en disco (`create_new_part`, `resolve_valid_part_template`).
   * Conversión de unidades (`mm_to_m`).
   * Invocación segura de métodos de 0 argumentos (`com_call_0`).
-  * Selección segura de entidades (`select_by_id`), planos multilenguaje (`select_reference_plane`) y creación de planos paralelos desfasados (`select_or_create_plane` con `InsertRefPlane`).
+  * Selección segura de entidades (`select_by_id`), selección directa de geometría `IFace2`/`IEdge` mediante `SelectionManager.AddSelectionListObject` + `CreateSelectData` (`select_entity`), planos multilenguaje (`select_reference_plane`) y creación de planos paralelos desfasados (`select_or_create_plane` con `InsertRefPlane`).
   * Creación de ejes de referencia en la intersección de planos ortogonales (`create_reference_axis` con `InsertAxis2`) e identificación de la última operación 3D sólida (`get_last_solid_feature_name`).
   * Control de preferencias de interfaz (`set_input_dim_on_create`).
 * **`sw_engine/primitives.py`**:
   * Traducción de 7 figuras 2D Pydantic (`CenterRectangle`, `CornerRectangle`, `Circle`, `Line`, `Polygon`, `Arc`, `Slot`) y línea constructiva (`AxisLine`) a llamadas de `ISketchManager` (`draw_shape`).
   * Ciclo de vida completo de un croquis (`build_sketch_on_plane`): seleccionar o crear plano desfasado -> `InsertSketch(True)` -> `AddToDB = True` -> dibujar primitivas y `CreateCenterLine` -> `AddToDB = False` -> `SetPickMode` -> `ClearSelection2(True)` -> `InsertSketch(True)` -> seleccionar croquis recién creado (`get_last_sketch_name`).
 * **`sw_engine/features.py`**:
-  * Operaciones 3D en `IFeatureManager`:
+  * Las 9 operaciones 3D en SolidWorks 2018:
     * Extrusión de saliente (`execute_extrude_boss` con `FeatureExtrusion2`, 23 parámetros).
     * Corte extruido (`execute_extrude_cut` con `FeatureCut3`, 26 parámetros, incluyendo corte hacia ambos lados `both_directions`).
     * Revolución de saliente y corte por revolución (`execute_revolve` con `FeatureRevolve2`, 20 parámetros).
     * Matriz circular (`execute_circular_pattern` con `FeatureCircularPattern4`, 7 parámetros).
     * Matriz lineal (`execute_linear_pattern` con `FeatureLinearPattern3`, 10 parámetros).
+    * Redondeo de aristas (`execute_fillet` con `IModelDoc2.FeatureFillet`, 5 parámetros, `VT_VOID`).
+    * Chaflán de aristas (`execute_chamfer` con `IModelDoc2.FeatureChamfer`, 3 parámetros, `VT_VOID`).
+    * Vaciado de carcasa (`execute_shell` con `IModelDoc2.InsertFeatureShell`, 2 parámetros, `VT_VOID`, seleccionando la cara exterior mediante normal + bounding box).
   * Orquestador de pieza completa (`build_part`).
 
 ---
@@ -93,4 +96,7 @@ El nombre de los planos base depende del idioma de la plantilla `.prtdot` con la
   * `IModelDoc2::InsertAxis2(True)` con dos planos base seleccionados (`Mark=0`) crea un `RefAxis` en su intersección (`"Y" = Front+Right`, `"Z" = Top+Right`, `"X" = Front+Top`).
   * `FeatureCircularPattern4(Number, Spacing, FlipDirection, DName, GeometryPattern, EqualSpacing, VaryInstance)`: requiere seleccionar la operación 3D con `Mark=4` (`"BODYFEATURE"`) y el eje con `Mark=1` (`"AXIS"`).
   * `FeatureLinearPattern3(Num1, Spacing1, Num2, Spacing2, FlipDir1, FlipDir2, DName1, DName2, GeometryPattern, VaryInstance)`: requiere seleccionar la operación 3D con `Mark=4`, eje X con `Mark=1` y eje Y con `Mark=2`.
+* **Selección de Caras/Aristas y Operaciones `VT_VOID` (`Fillet`, `Chamfer`, `Shell`):**
+  * En `pywin32` late-binding, las interfaces `IFace2` e `IEdge` NO exponen `Select2()` en su `IDispatch` por defecto (`IEntity` es una interfaz COM separada). Por eso `select_entity()` usa `SelectionManager.AddSelectionListObject(obj, CreateSelectData())` con `Mark=1`.
+  * Los métodos `IModelDoc2.FeatureFillet` (5 parámetros), `IModelDoc2.FeatureChamfer` (3 parámetros) y `IModelDoc2.InsertFeatureShell` (2 parámetros) devuelven `VT_VOID` (`None` en Python), por lo que el éxito de la operación se valida comparando el último nombre de operación 3D en el árbol (`get_last_solid_feature_name`).
 
