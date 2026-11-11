@@ -816,6 +816,9 @@ def _collect_unique_straight_edges(
 
         for edge in edges or []:
             try:
+                curve = com_call_0(edge, "GetCurve")
+                if curve is not None and not bool(com_call_0(curve, "IsLine")):
+                    continue
                 v1 = com_call_0(edge, "GetStartVertex")
                 v2 = com_call_0(edge, "GetEndVertex")
                 if v1 is None or v2 is None:
@@ -886,27 +889,33 @@ def execute_fillet(model: Any, op: FilletOperation) -> Any:
                 if dx < 1e-4 and dz < 1e-4 and dy > 1e-3:
                     candidate_edges.append(edge)
         else:
-            # 'horizontal_slot_ends': detecta caras verticales interiores de fin de ranura
+            # 'horizontal_slot_ends': detecta caras PLANAS verticales interiores de fin de ranura
             # (cuyo rango Y está estrictamente dentro de la altura total de la pieza, ej. [-5mm, +5mm]
-            # dentro de [-10mm, +10mm]) y selecciona sus aristas horizontales superior e inferior.
+            # dentro de [-10mm, +10mm]) y selecciona sus aristas rectas horizontales superior e inferior.
             max_abs_y = max((max(abs(p1[1]), abs(p2[1])) for _, p1, p2 in all_edges), default=0.01)
             bodies = model.GetBodies2(0, True) or []
             seen_end_edges: set[tuple[float, float, float, float, float, float]] = set()
             for body in bodies:
                 for face in com_call_0(body, "GetFaces") or []:
                     try:
+                        surf = com_call_0(face, "GetSurface")
+                        if surf is not None and not bool(com_call_0(surf, "IsPlane")):
+                            continue
                         box = com_call_0(face, "GetBox")
                         if not box or len(box) < 6:
                             continue
                         f_ymin, f_ymax = float(box[1]), float(box[4])
                         f_height = f_ymax - f_ymin
-                        # La cara debe abarcar el espesor del vaciado central sin tocar las caras exteriores Y=±max_abs_y
+                        # La cara plana debe abarcar el espesor del vaciado central sin tocar Y=±max_abs_y
                         if (
                             f_height > 0.001
                             and f_ymin > (-max_abs_y + 0.0005)
                             and f_ymax < (max_abs_y - 0.0005)
                         ):
                             for edge in com_call_0(face, "GetEdges") or []:
+                                curve = com_call_0(edge, "GetCurve")
+                                if curve is not None and not bool(com_call_0(curve, "IsLine")):
+                                    continue
                                 v1 = com_call_0(edge, "GetStartVertex")
                                 v2 = com_call_0(edge, "GetEndVertex")
                                 if v1 is None or v2 is None:
@@ -930,9 +939,9 @@ def execute_fillet(model: Any, op: FilletOperation) -> Any:
         print(f"     -> Filtro fillet '{op.edges}': {len(candidate_edges)} arista(s) candidata(s) detectada(s)...")
 
         # Para horizontal_slot_ends donde 2*R suele igualar la altura del vaciado (ej. R5 en ranura de 10mm),
-        # probamos primero 0.96*R si R exacto falla por aniquilación total de la cara plana en Parasolid.
+        # probamos primero 0.96*R para evitar que Parasolid rechace la desaparición total de la cara plana.
         radii_to_try = (
-            [radius_m * 0.96, radius_m]
+            [radius_m * 0.96, radius_m * 0.90, radius_m]
             if op.edges == "horizontal_slot_ends"
             else [radius_m, radius_m * 0.96]
         )
@@ -941,28 +950,11 @@ def execute_fillet(model: Any, op: FilletOperation) -> Any:
             model.ClearSelection2(True)
             for edge in candidate_edges:
                 select_entity(model, edge, append=True, mark=1)
-            model.FeatureFillet(float(r_try), True, False, False, 0)
+            model.FeatureFillet(float(r_try), False, False, False, 0)
             after_name, _ = get_last_solid_feature_name(model)
             if after_name != target_feat_name:
                 model.ClearSelection2(True)
                 return after_name
-
-        # Fallback individual arista por arista si alguna arista del lote impidió el redondeo global
-        any_created = False
-        cur_last = target_feat_name
-        for edge in candidate_edges:
-            for r_try in radii_to_try:
-                model.ClearSelection2(True)
-                if select_entity(model, edge, append=False, mark=1):
-                    model.FeatureFillet(float(r_try), True, False, False, 0)
-                    now_name, _ = get_last_solid_feature_name(model)
-                    if now_name != cur_last:
-                        cur_last = now_name
-                        any_created = True
-                        break
-        if any_created:
-            model.ClearSelection2(True)
-            return cur_last
 
     # Modo 'last_feature' o 'all'
     _select_edges_of_last_feature(model, target_feat_name)
