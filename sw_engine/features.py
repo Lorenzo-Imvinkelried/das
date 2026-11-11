@@ -695,19 +695,24 @@ def execute_linear_pattern(model: Any, op: LinearPatternOperation) -> Any:
 
 
 def _mirror_point(x: float, y: float, flip_x: bool, flip_y: bool) -> tuple[float, float]:
-    """Refleja un punto 2D (x, y) invirtiendo X y/o Y."""
-    return (
-        round(-x if flip_x else x, 4),
-        round(-y if flip_y else y, 4),
-    )
+    """Refleja un punto 2D (x, y) invirtiendo X y/o Y sin generar -0.0."""
+    nx = round(-x if flip_x else x, 4)
+    ny = round(-y if flip_y else y, 4)
+    return (0.0 if nx == 0.0 else nx, 0.0 if ny == 0.0 else ny)
 
 
 def _mirror_sketch(sketch: Sketch, flip_x: bool, flip_y: bool) -> Sketch:
-    """Devuelve una copia del Sketch reflejada respecto al eje X o Y del croquis."""
+    """
+    Devuelve una copia del Sketch reflejada respecto al eje X o Y del croquis.
+    Cuando se invierte un solo eje (flip_x ^ flip_y), invierte también el orden de recorrido
+    de líneas y arcos intercambiando (x1,y1)<->(x2,y2) para conservar exactamente el mismo
+    sentido de giro (antihorario, direction=1) que funcionó en el croquis original.
+    """
     mirrored_shapes: list[ShapeType] = []
-    dir_sign = -1 if (flip_x ^ flip_y) else 1
+    invert_winding = bool(flip_x ^ flip_y)
+    source_shapes = list(reversed(sketch.shapes)) if invert_winding else list(sketch.shapes)
 
-    for s in sketch.shapes:
+    for s in source_shapes:
         if isinstance(s, Circle):
             nx, ny = _mirror_point(s.cx, s.cy, flip_x, flip_y)
             mirrored_shapes.append(Circle(cx=nx, cy=ny, diameter=s.diameter))
@@ -719,13 +724,18 @@ def _mirror_sketch(sketch: Sketch, flip_x: bool, flip_y: bool) -> Sketch:
         elif isinstance(s, Line):
             x1, y1 = _mirror_point(s.x1, s.y1, flip_x, flip_y)
             x2, y2 = _mirror_point(s.x2, s.y2, flip_x, flip_y)
-            mirrored_shapes.append(Line(x1=x1, y1=y1, x2=x2, y2=y2))
+            if invert_winding:
+                mirrored_shapes.append(Line(x1=x2, y1=y2, x2=x1, y2=y1))
+            else:
+                mirrored_shapes.append(Line(x1=x1, y1=y1, x2=x2, y2=y2))
         elif isinstance(s, Arc):
             cx, cy = _mirror_point(s.cx, s.cy, flip_x, flip_y)
             x1, y1 = _mirror_point(s.x1, s.y1, flip_x, flip_y)
             x2, y2 = _mirror_point(s.x2, s.y2, flip_x, flip_y)
-            new_dir: Literal[1, -1] = 1 if (s.direction * dir_sign) > 0 else -1
-            mirrored_shapes.append(Arc(cx=cx, cy=cy, x1=x1, y1=y1, x2=x2, y2=y2, direction=new_dir))
+            if invert_winding:
+                mirrored_shapes.append(Arc(cx=cx, cy=cy, x1=x2, y1=y2, x2=x1, y2=y1, direction=s.direction))
+            else:
+                mirrored_shapes.append(Arc(cx=cx, cy=cy, x1=x1, y1=y1, x2=x2, y2=y2, direction=s.direction))
         elif isinstance(s, Slot):
             x1, y1 = _mirror_point(s.x1, s.y1, flip_x, flip_y)
             x2, y2 = _mirror_point(s.x2, s.y2, flip_x, flip_y)
@@ -1132,22 +1142,66 @@ def _format_operation_summary(op: OperationType) -> str:
     return f"'{op.type}' en plano '{op.plane}'{offset_info} ({len(op.sketch.shapes)} figura(s))"
 
 
+def _optimize_operation_order(operations: list[OperationType]) -> list[OperationType]:
+    """
+    Reordena de forma segura bloques contiguos de cortes (ExtrudeCutOperation + sus patrones/espejos)
+    para que los agujeros pasantes (through_all=True, ej. agujero central Ø50 en el origen 0,0)
+    se ejecuten ANTES que los cortes parciales en cuña (through_all=False con vértice en 0,0).
+    En geometría booleana CSG la resta es conmutativa ((B - C1) - C2 == (B - C2) - C1), y vaciar
+    primero el centro evita que dos cuñas reflejadas generen espesor cero (Zero-Thickness) en (0,0).
+    """
+    units: list[list[OperationType]] = []
+    for op in operations:
+        if isinstance(op, (CircularPatternOperation, LinearPatternOperation, MirrorOperation)) and units:
+            units[-1].append(op)
+        else:
+            units.append([op])
+
+    optimized_units: list[list[OperationType]] = []
+    cut_buffer: list[list[OperationType]] = []
+
+    def _flush_cut_buffer() -> None:
+        if not cut_buffer:
+            return
+        through_all_cuts = [
+            u for u in cut_buffer if isinstance(u[0], ExtrudeCutOperation) and u[0].through_all
+        ]
+        partial_cuts = [
+            u for u in cut_buffer if not (isinstance(u[0], ExtrudeCutOperation) and u[0].through_all)
+        ]
+        optimized_units.extend(through_all_cuts)
+        optimized_units.extend(partial_cuts)
+        cut_buffer.clear()
+
+    for u in units:
+        if isinstance(u[0], ExtrudeCutOperation):
+            cut_buffer.append(u)
+        else:
+            _flush_cut_buffer()
+            optimized_units.append(u)
+    _flush_cut_buffer()
+
+    return [op for u in optimized_units for op in u]
+
+
 def build_part(part: CADPart) -> Any:
     """
     Orquesta la construcción completa de una pieza CADPart en SolidWorks 2018:
     - Conecta a SolidWorks 2018 y abre una pieza limpia.
     - Desactiva temporalmente swInputDimValOnCreate (enum 10) y swSketchInference (enum 249).
+    - Optimiza el orden de cortes pasantes antes de cortes parciales para evitar espesor cero en (0,0).
     - Ejecuta secuencialmente cada croquis y operación 3D imprimiendo telemetría detallada.
     - Restaura las preferencias del usuario y ajusta la vista isométrica.
     """
     sw_app = connect_to_solidworks()
     model = create_new_part(sw_app)
 
+    ordered_ops = _optimize_operation_order(part.operations)
     prev_dim_toggle = set_input_dim_on_create(sw_app, False)
     prev_op: Optional[OperationType] = None
     try:
-        for idx, operation in enumerate(part.operations, start=1):
-            print(f"  [{idx}/{len(part.operations)}] Ejecutando {_format_operation_summary(operation)}...")
+        for idx, operation in enumerate(ordered_ops, start=1):
+            print(f"  [{idx}/{len(ordered_ops)}] Ejecutando {_format_operation_summary(operation)}...")
             execute_operation(model, operation, prev_op=prev_op)
             last_name, last_type = get_last_solid_feature_name(model)
             print(f"     [OK] Operación {idx} completada -> última feature en árbol: '{last_name}' ({last_type})")

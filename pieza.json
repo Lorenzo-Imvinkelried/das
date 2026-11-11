@@ -1,5 +1,5 @@
 {
-  "part_name": "Abrazadera_Brida_Partida",
+  "part_name": "Abrazadera_Brida_Partida_Exacta",
   "operations": [
     {
       "type": "extrude_boss",
@@ -15,43 +15,6 @@
             "cx": 0.0,
             "cy": 0.0,
             "diameter": 60.0
-          }
-        ]
-      }
-    },
-    {
-      "type": "extrude_boss",
-      "plane": "Top",
-      "plane_offset_mm": 0.0,
-      "depth_mm": 20.0,
-      "midplane": true,
-      "both_directions": false,
-      "sketch": {
-        "shapes": [
-          {
-            "kind": "corner_rectangle",
-            "x1": -40.0,
-            "y1": -6.0,
-            "x2": 0.0,
-            "y2": 6.0
-          }
-        ]
-      }
-    },
-    {
-      "type": "extrude_boss",
-      "plane": "Front",
-      "plane_offset_mm": 0.0,
-      "depth_mm": 12.0,
-      "midplane": true,
-      "both_directions": false,
-      "sketch": {
-        "shapes": [
-          {
-            "kind": "circle",
-            "cx": -40.0,
-            "cy": 0.0,
-            "diameter": 20.0
           }
         ]
       }
@@ -95,6 +58,83 @@
           }
         ]
       }
+    },
+    {
+      "type": "extrude_boss",
+      "plane": "Top",
+      "plane_offset_mm": 0.0,
+      "depth_mm": 20.0,
+      "midplane": true,
+      "both_directions": false,
+      "sketch": {
+        "shapes": [
+          {
+            "kind": "corner_rectangle",
+            "x1": -40.0,
+            "y1": -6.0,
+            "x2": 0.0,
+            "y2": 6.0
+          }
+        ]
+      }
+    },
+    {
+      "type": "extrude_boss",
+      "plane": "Front",
+      "plane_offset_mm": 0.0,
+      "depth_mm": 12.0,
+      "midplane": true,
+      "both_directions": false,
+      "sketch": {
+        "shapes": [
+          {
+            "kind": "circle",
+            "cx": -40.0,
+            "cy": 0.0,
+            "diameter": 20.0
+          }
+        ]
+      }
+    },
+    {
+      "type": "extrude_cut",
+      "plane": "Top",
+      "plane_offset_mm": 0.0,
+      "through_all": false,
+      "both_directions": true,
+      "depth_mm": 10.0,
+      "sketch": {
+        "shapes": [
+          {
+            "kind": "line",
+            "x1": 0.0,
+            "y1": 0.0,
+            "x2": 48.3,
+            "y2": 12.94
+          },
+          {
+            "kind": "arc",
+            "cx": 0.0,
+            "cy": 0.0,
+            "x1": 48.3,
+            "y1": 12.94,
+            "x2": -12.94,
+            "y2": 48.3,
+            "direction": 1
+          },
+          {
+            "kind": "line",
+            "x1": -12.94,
+            "y1": 48.3,
+            "x2": 0.0,
+            "y2": 0.0
+          }
+        ]
+      }
+    },
+    {
+      "type": "mirror",
+      "plane": "Front"
     },
     {
       "type": "extrude_cut",
@@ -162,64 +202,6 @@
           }
         ]
       }
-    },
-    {
-      "type": "extrude_cut",
-      "plane": "Top",
-      "plane_offset_mm": 0.0,
-      "through_all": false,
-      "both_directions": true,
-      "depth_mm": 10.0,
-      "sketch": {
-        "shapes": [
-          {
-            "kind": "line",
-            "x1": 21.25,
-            "y1": 5.69,
-            "x2": 53.13,
-            "y2": 14.24
-          },
-          {
-            "kind": "line",
-            "x1": 53.13,
-            "y1": 14.24,
-            "x2": 21.05,
-            "y2": 50.81
-          },
-          {
-            "kind": "line",
-            "x1": 21.05,
-            "y1": 50.81,
-            "x2": -27.5,
-            "y2": 47.63
-          },
-          {
-            "kind": "line",
-            "x1": -27.5,
-            "y1": 47.63,
-            "x2": -11.0,
-            "y2": 19.05
-          },
-          {
-            "kind": "line",
-            "x1": -11.0,
-            "y1": 19.05,
-            "x2": 8.42,
-            "y2": 20.33
-          },
-          {
-            "kind": "line",
-            "x1": 8.42,
-            "y1": 20.33,
-            "x2": 21.25,
-            "y2": 5.69
-          }
-        ]
-      }
-    },
-    {
-      "type": "mirror",
-      "plane": "Front"
     }
   ]
 }
