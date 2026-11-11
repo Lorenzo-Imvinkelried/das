@@ -22,6 +22,9 @@ No inventes campos ni tipos de operaciones fuera de esta lista exacta:
   - `"revolve_boss"` / `"revolve_cut"`: `{"type": "revolve_boss", "plane": "Front", "plane_offset_mm": 0.0, "angle_deg": 360.0, "axis_line": {"x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 50.0}, "sketch": {"shapes": [...]}}`
   - `"circular_pattern"`: `{"type": "circular_pattern", "instances": 6, "angle_deg": 360.0, "axis": "Y", "equal_spacing": true}` (`"axis"` puede ser `"X"`, `"Y"` o `"Z"`)
   - `"linear_pattern"`: `{"type": "linear_pattern", "instances_x": 3, "spacing_x_mm": 20.0, "instances_y": 1, "spacing_y_mm": 10.0}`
+  - `"fillet"`: `{"type": "fillet", "radius_mm": 2.0}`
+  - `"chamfer"`: `{"type": "chamfer", "distance_mm": 1.5, "angle_deg": 45.0}`
+  - `"shell"`: `{"type": "shell", "thickness_mm": 2.0, "open_face": "Top", "outward": false}` (`"open_face"` en `"Top"`, `"Bottom"`, `"Front"`, `"Back"`, `"Right"`, `"Left"`)
 - **Figuras 2D (`kind` dentro de `sketch.shapes`):**
   - `"center_rectangle"`: `{"kind": "center_rectangle", "cx": 0.0, "cy": 0.0, "width": 100.0, "height": 50.0}`
   - `"corner_rectangle"`: `{"kind": "corner_rectangle", "x1": 0.0, "y1": 0.0, "x2": 100.0, "y2": 50.0}`

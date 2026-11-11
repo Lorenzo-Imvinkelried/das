@@ -251,6 +251,33 @@ class LinearPatternOperation(BaseModel):
     spacing_y_mm: float = Field(default=10.0, gt=0.0, description="Separación entre instancias en Y (mm)")
 
 
+class FilletOperation(BaseModel):
+    """Operación 3D de redondeo constante sobre las aristas de la última operación 3D."""
+
+    type: Literal["fillet"] = "fillet"
+    radius_mm: float = Field(..., gt=0.0, description="Radio del redondeo en milímetros (mm)")
+
+
+class ChamferOperation(BaseModel):
+    """Operación 3D de chaflán (distancia y ángulo) sobre las aristas de la última operación 3D."""
+
+    type: Literal["chamfer"] = "chamfer"
+    distance_mm: float = Field(..., gt=0.0, description="Distancia o ancho del chaflán en milímetros (mm)")
+    angle_deg: float = Field(default=45.0, gt=0.0, lt=90.0, description="Ángulo del chaflán en grados (por defecto 45°)")
+
+
+class ShellOperation(BaseModel):
+    """Operación 3D de vaciado (carcasa de pared delgada) eliminando la cara exterior indicada."""
+
+    type: Literal["shell"] = "shell"
+    thickness_mm: float = Field(..., gt=0.0, description="Espesor de pared del vaciado en milímetros (mm)")
+    open_face: Literal["Top", "Bottom", "Front", "Back", "Right", "Left"] = Field(
+        default="Top",
+        description="Cara exterior a eliminar para abrir la carcasa ('Top', 'Bottom', 'Front', 'Back', 'Right', 'Left')",
+    )
+    outward: bool = Field(default=False, description="Si es True, agrega el espesor hacia afuera")
+
+
 OperationType = Annotated[
     Union[
         ExtrudeBossOperation,
@@ -259,6 +286,9 @@ OperationType = Annotated[
         RevolveCutOperation,
         CircularPatternOperation,
         LinearPatternOperation,
+        FilletOperation,
+        ChamferOperation,
+        ShellOperation,
     ],
     Field(discriminator="type"),
 ]

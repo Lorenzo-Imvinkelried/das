@@ -2,13 +2,16 @@ import math
 from typing import Any, Union
 from schemas.cad_schema import (
     CADPart,
+    ChamferOperation,
     CircularPatternOperation,
     ExtrudeBossOperation,
     ExtrudeCutOperation,
+    FilletOperation,
     LinearPatternOperation,
     OperationType,
     RevolveBossOperation,
     RevolveCutOperation,
+    ShellOperation,
 )
 from .connection import (
     com_call_0,
@@ -348,6 +351,145 @@ def execute_linear_pattern(model: Any, op: LinearPatternOperation) -> Any:
     return feat
 
 
+def _select_edges_of_last_feature(model: Any, target_feat_name: str) -> None:
+    """Selecciona la última operación 3D y sus aristas para redondeo o chaflán."""
+    model.ClearSelection2(True)
+    selected_edges = 0
+    feat = com_call_0(model, "FirstFeature")
+    while feat is not None:
+        if str(com_call_0(feat, "Name") or "") == target_feat_name:
+            faces = com_call_0(feat, "GetFaces")
+            if faces:
+                for face in faces:
+                    edges = com_call_0(face, "GetEdges")
+                    if edges:
+                        for edge in edges:
+                            try:
+                                edge.Select2(True, 1)
+                                selected_edges += 1
+                            except Exception:
+                                pass
+            break
+        feat = com_call_0(feat, "GetNextFeature")
+
+    if selected_edges == 0:
+        select_by_id(model, target_feat_name, "BODYFEATURE", 0.0, 0.0, 0.0, append=False, mark=1)
+
+
+def execute_fillet(model: Any, op: FilletOperation) -> Any:
+    """
+    Ejecuta un redondeo de radio constante (FeatureFillet) sobre las aristas
+    de la última operación 3D creada.
+    """
+    target_feat_name, _ = get_last_solid_feature_name(model)
+    radius_m = mm_to_m(op.radius_mm)
+
+    _select_edges_of_last_feature(model, target_feat_name)
+    feat = model.FeatureFillet(
+        float(radius_m),  # 1. R1: radio en metros
+        True,             # 2. Propagate: propagación tangente
+        False,            # 3. Ftyp: radio constante
+        False,            # 4. VarRadTyp
+        0,                # 5. OverflowType (0 = default)
+    )
+    if feat is None:
+        model.ClearSelection2(True)
+        select_by_id(model, target_feat_name, "BODYFEATURE", 0.0, 0.0, 0.0, append=False, mark=0)
+        feat = model.FeatureFillet(float(radius_m), True, False, False, 0)
+
+    if feat is None:
+        raise RuntimeError(
+            f"Falló FeatureFillet ({op.radius_mm} mm) sobre la operación '{target_feat_name}'."
+        )
+
+    model.ClearSelection2(True)
+    return feat
+
+
+def execute_chamfer(model: Any, op: ChamferOperation) -> Any:
+    """
+    Ejecuta un chaflán de distancia y ángulo (FeatureChamfer) sobre las aristas
+    de la última operación 3D creada.
+    """
+    target_feat_name, _ = get_last_solid_feature_name(model)
+    width_m = mm_to_m(op.distance_mm)
+    angle_rad = math.radians(float(op.angle_deg))
+
+    _select_edges_of_last_feature(model, target_feat_name)
+    feat = model.FeatureChamfer(
+        float(width_m),    # 1. Width (metros)
+        float(angle_rad),  # 2. Angle (radianes)
+        False,             # 3. Flip
+    )
+    if feat is None:
+        raise RuntimeError(
+            f"Falló FeatureChamfer ({op.distance_mm} mm x {op.angle_deg}°) sobre '{target_feat_name}'."
+        )
+
+    model.ClearSelection2(True)
+    return feat
+
+
+def execute_shell(model: Any, op: ShellOperation) -> Any:
+    """
+    Ejecuta un vaciado (InsertFeatureShell) sobre el sólido actual, seleccionando
+    automáticamente la cara exterior plana cuya normal apunta en la dirección op.open_face.
+    """
+    direction_vectors: dict[str, tuple[float, float, float]] = {
+        "Top": (0.0, 1.0, 0.0),
+        "Bottom": (0.0, -1.0, 0.0),
+        "Front": (0.0, 0.0, 1.0),
+        "Back": (0.0, 0.0, -1.0),
+        "Right": (1.0, 0.0, 0.0),
+        "Left": (-1.0, 0.0, 0.0),
+    }
+    target_vec = direction_vectors.get(op.open_face, (0.0, 1.0, 0.0))
+
+    model.ClearSelection2(True)
+    best_face = None
+    best_score = -1e9
+
+    bodies = model.GetBodies2(0, True)  # 0 = swSolidBody
+    if bodies:
+        for body in bodies:
+            faces = com_call_0(body, "GetFaces")
+            if not faces:
+                continue
+            for face in faces:
+                try:
+                    normal = com_call_0(face, "Normal")
+                    box = com_call_0(face, "GetBox")
+                    if normal and len(normal) >= 3:
+                        dot = (
+                            float(normal[0]) * target_vec[0]
+                            + float(normal[1]) * target_vec[1]
+                            + float(normal[2]) * target_vec[2]
+                        )
+                        pos_proj = 0.0
+                        if box and len(box) >= 6:
+                            cx = 0.5 * (float(box[0]) + float(box[3]))
+                            cy = 0.5 * (float(box[1]) + float(box[4]))
+                            cz = 0.5 * (float(box[2]) + float(box[5]))
+                            pos_proj = cx * target_vec[0] + cy * target_vec[1] + cz * target_vec[2]
+                        score = dot * 100.0 + pos_proj
+                        if score > best_score:
+                            best_score = score
+                            best_face = face
+                except Exception:
+                    pass
+
+    if best_face is None:
+        raise RuntimeError(
+            f"No se encontró una cara exterior en dirección '{op.open_face}' para ejecutar el vaciado (shell)."
+        )
+
+    best_face.Select2(False, 1)
+    thickness_m = mm_to_m(op.thickness_mm)
+    model.InsertFeatureShell(float(thickness_m), bool(op.outward))
+    model.ClearSelection2(True)
+    return True
+
+
 def execute_operation(model: Any, op: OperationType) -> Any:
     """Despacha una operación validada por Pydantic hacia su ejecutor de SolidWorks."""
     if isinstance(op, ExtrudeBossOperation):
@@ -362,6 +504,12 @@ def execute_operation(model: Any, op: OperationType) -> Any:
         return execute_circular_pattern(model, op)
     if isinstance(op, LinearPatternOperation):
         return execute_linear_pattern(model, op)
+    if isinstance(op, FilletOperation):
+        return execute_fillet(model, op)
+    if isinstance(op, ChamferOperation):
+        return execute_chamfer(model, op)
+    if isinstance(op, ShellOperation):
+        return execute_shell(model, op)
     raise ValueError(f"Tipo de operación no soportada: {type(op)}")
 
 
@@ -371,6 +519,12 @@ def _format_operation_summary(op: OperationType) -> str:
         return f"'{op.type}' ({op.instances} instancias a {op.angle_deg}° sobre eje '{op.axis}')"
     if isinstance(op, LinearPatternOperation):
         return f"'{op.type}' ({op.instances_x}x{op.instances_y} instancias)"
+    if isinstance(op, FilletOperation):
+        return f"'{op.type}' (R{op.radius_mm:g} mm)"
+    if isinstance(op, ChamferOperation):
+        return f"'{op.type}' ({op.distance_mm:g} mm x {op.angle_deg:g}°)"
+    if isinstance(op, ShellOperation):
+        return f"'{op.type}' (espesor {op.thickness_mm:g} mm, cara abierta '{op.open_face}')"
     offset_info = f" (offset {op.plane_offset_mm:g} mm)" if abs(op.plane_offset_mm) > 1e-6 else ""
     return f"'{op.type}' en plano '{op.plane}'{offset_info} ({len(op.sketch.shapes)} figura(s))"
 
