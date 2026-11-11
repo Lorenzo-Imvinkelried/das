@@ -103,3 +103,15 @@ Este documento registra cada problema real encontrado durante la construcción y
   2. Se implementó **Descomposición Booleana 3D Automática** en `execute_extrude_boss` y `execute_extrude_cut`: si un croquis con múltiples figuras cerradas (`Circle`, `CenterRectangle`, `CornerRectangle`, `Polygon`, `Slot`) falla porque sus contornos se solapan, el motor elimina el croquis combinado huérfano (`DeleteSelection2(0)`) y extruye/corta cada figura secuencialmente con `Merge = True`, logrando que el kernel Parasolid de SolidWorks las una en un único sólido 3D limpio sin necesidad de recortar líneas 2D.
   3. En `_cut_single_sketch`, cuando `through_all=True` o `both_directions=True`, se prueba primero `sd=False` (corte hacia ambos lados del plano) para atravesar piezas simétricas completas.
 
+---
+
+## Incidente #9: `Falló FeatureCircularPattern4 sobre la operación 'Cut-Extrude4' alrededor del eje 'Y' (Axis1)` en `Abrazadera_Brida_Partida`
+* **Síntoma:** Las primeras 9 operaciones de `Abrazadera_Brida_Partida` (`pieza.json`) se ejecutaron con éxito, pero la operación 10 (`circular_pattern` con `instances: 3` sobre `Cut-Extrude4`) falló.
+* **Causa Raíz:**
+  1. **Profundidad duplicada cuando `both_directions=True` y `through_all=False`:** En la operación 9 (`Cut-Extrude4`), la IA indicó `"both_directions": true, "through_all": false, "depth_mm": 10.0` sobre un cilindro de `20.0 mm` de alto total (`midplane: true`). Al invocar `FeatureCut3` con `sd=False` y `D1=10 mm, D2=10 mm`, el corte perforó `20 mm` totales (`10 mm` hacia arriba + `10 mm` hacia abajo), cortando la pared completa del anillo en vez de dejar `5 mm` arriba y `5 mm` abajo. Al intentar repetir ese corte 3 veces en círculo, el sólido se dividía en múltiples cuerpos inconexos (prohibido por `FeatureCircularPattern4`).
+  2. **Cambio topológico al cruzar la ranura de apriete (`Cut-Extrude3`):** Al rotar `Cut-Extrude4` $+120^\circ$, la segunda instancia cae sobre la ranura de apriete (`x = -55..0`), donde la cara cilíndrica ya está partida en dos mitades, lo que hace que el solucionador de patrones de operaciones de SolidWorks devuelva `None`.
+* **Solución Aplicada:**
+  1. En `_cut_single_sketch` (`sw_engine/features.py`), cuando `both_directions=True` y `through_all=False`, se usa `SW_END_COND_MID_PLANE (6)` con `depth_1_m = depth_m` (o `sd=False` con `depth_m / 2.0` hacia cada lado), respetando la profundidad total centrada.
+  2. En `execute_circular_pattern`, además de probar `FeatureCircularPattern4` con `GeometryPattern=False/True` y ángulo total/paso angular, se implementó un **Fallback Geométrico de Rotación 2D** (`_rotate_sketch`): si SolidWorks rechaza la matriz 3D por cambio topológico, el motor rota automáticamente las coordenadas 2D del croquis anterior por $k \times \Delta\theta$ y ejecuta los cortes directamente con el kernel booleano.
+  3. En `main.py`, se redirigió `sys.stdout` en tiempo real hacia el cuadro de texto de la GUI y hacia el archivo `ultimo_log.txt` para contar con trazabilidad completa en cada ejecución.
+
