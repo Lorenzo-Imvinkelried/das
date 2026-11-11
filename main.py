@@ -1,18 +1,32 @@
 import argparse
 import gc
+import importlib
 import json
 from pathlib import Path
 import re
 import tkinter as tk
 from tkinter import messagebox, scrolledtext
 import traceback
+from typing import Any
 
+import schemas.cad_schema
+import sw_engine.connection
+import sw_engine.primitives
+import sw_engine.features
 from schemas.cad_schema import CADPart
 from sw_engine import build_part, com_call_0
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_JSON_PATH = BASE_DIR / "pieza.json"
 PROMPT_FILE_PATH = BASE_DIR / "PROMPT_PARA_CHAT.txt"
+
+
+def reload_engine_modules() -> None:
+    """Recarga en caliente los módulos del esquema y motor COM desde disco."""
+    importlib.reload(schemas.cad_schema)
+    importlib.reload(sw_engine.connection)
+    importlib.reload(sw_engine.primitives)
+    importlib.reload(sw_engine.features)
 
 
 def clean_json_text(raw_text: str) -> str:
@@ -37,12 +51,13 @@ def clean_json_text(raw_text: str) -> str:
     return text
 
 
-def parse_and_validate_part(raw_text: str) -> CADPart:
+def parse_and_validate_part(raw_text: str) -> Any:
     """Limpia el texto JSON y lo valida contra el esquema Pydantic CADPart."""
+    reload_engine_modules()
     cleaned = clean_json_text(raw_text)
     if not cleaned:
         raise ValueError("El texto JSON está vacío.")
-    return CADPart.model_validate_json(cleaned)
+    return schemas.cad_schema.CADPart.model_validate_json(cleaned)
 
 
 def run_from_file(json_path: Path) -> None:
@@ -53,7 +68,7 @@ def run_from_file(json_path: Path) -> None:
     raw_text = json_path.read_text(encoding="utf-8")
     part = parse_and_validate_part(raw_text)
     print(f"[OK] Pieza validada: '{part.part_name}' ({len(part.operations)} operaciones)")
-    model = build_part(part)
+    model = sw_engine.features.build_part(part)
     try:
         doc_title = str(com_call_0(model, "GetTitle"))
     except Exception:
@@ -277,7 +292,11 @@ class Sketch2SolidApp:
             formatted = json.dumps(part.model_dump(), indent=2, ensure_ascii=False)
             self.json_editor.delete("1.0", tk.END)
             self.json_editor.insert("1.0", formatted)
-            total_shapes = sum(len(op.sketch.shapes) for op in part.operations)
+            total_shapes = sum(
+                len(op.sketch.shapes)
+                for op in part.operations
+                if getattr(op, "sketch", None) is not None
+            )
             msg = (
                 f"JSON 100% válido.\n"
                 f"- Nombre de pieza: {part.part_name}\n"
@@ -304,7 +323,7 @@ class Sketch2SolidApp:
                 f"Conectando a SolidWorks 2018 y construyendo '{part.part_name}' "
                 f"({len(part.operations)} operaciones)..."
             )
-            model = build_part(part)
+            model = sw_engine.features.build_part(part)
             try:
                 doc_title = str(com_call_0(model, "GetTitle"))
             except Exception:

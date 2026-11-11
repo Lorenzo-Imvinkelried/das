@@ -30,9 +30,13 @@ from .connection import (
 from .primitives import build_sketch_on_plane
 
 # Constantes de condición final de extrusión (swEndConditions_e)
-SW_END_COND_BLIND = 0        # Hasta profundidad especificada
-SW_END_COND_THROUGH_ALL = 1  # Por todo
-SW_END_COND_MID_PLANE = 6    # Plano medio
+SW_END_COND_BLIND = 0              # Hasta profundidad especificada
+SW_END_COND_THROUGH_ALL = 1        # Por todo (una dirección)
+SW_END_COND_MID_PLANE = 6          # Plano medio
+SW_END_COND_THROUGH_ALL_BOTH = 9   # Por todo - Ambos lados
+
+# Opción de borrado en IModelDocExtension.DeleteSelection2 (swDeleteSelectionOptions_e)
+SW_DELETE_CHILDREN = 1             # swDelete_Children
 
 # Vista estándar Isométrica (swStandardViews_e.swIsometricView)
 SW_VIEW_ISOMETRIC = 7
@@ -80,7 +84,7 @@ def _extrude_single_sketch_boss(
     depth_m: float,
     use_midplane: bool,
 ) -> Any:
-    """Intenta extruir un croquis ya cerrado y seleccionado (con fallback en plano medio)."""
+    """Intenta extruir un croquis ya cerrado y seleccionado (con fallback en plano medio y ciego)."""
     feat_mgr = model.FeatureManager
     end_cond_1 = SW_END_COND_MID_PLANE if use_midplane else SW_END_COND_BLIND
 
@@ -106,6 +110,17 @@ def _extrude_single_sketch_boss(
             depth_2_m=depth_m / 2.0,
         )
 
+    if feat is None and sketch_name:
+        select_by_id(model, sketch_name, "SKETCH", 0.0, 0.0, 0.0, append=False, mark=0)
+        feat = _call_feature_extrusion2(
+            feat_mgr=feat_mgr,
+            sd=True,
+            end_cond_1=SW_END_COND_BLIND,
+            end_cond_2=SW_END_COND_BLIND,
+            depth_1_m=depth_m,
+            depth_2_m=0.0,
+        )
+
     return feat
 
 
@@ -116,7 +131,7 @@ def _delete_sketch_silently(model: Any, sketch_name: str) -> None:
     try:
         model.ClearSelection2(True)
         if select_by_id(model, sketch_name, "SKETCH", 0.0, 0.0, 0.0, append=False, mark=0):
-            model.Extension.DeleteSelection2(0)
+            model.Extension.DeleteSelection2(SW_DELETE_CHILDREN)
         model.ClearSelection2(True)
     except Exception:
         pass
@@ -127,16 +142,57 @@ def _all_shapes_are_closed_primitives(sketch: Sketch) -> bool:
     return all(not isinstance(s, (Line, Arc)) for s in sketch.shapes)
 
 
+def _are_concentric_shapes(sketch: Sketch) -> bool:
+    """
+    Devuelve True si todas las figuras del croquis tienen el mismo centro (cx, cy),
+    por ejemplo dos círculos concéntricos para formar un tubo hueco.
+    """
+    centers: list[tuple[float, float]] = []
+    for s in sketch.shapes:
+        cx = getattr(s, "cx", None)
+        cy = getattr(s, "cy", None)
+        if cx is None or cy is None:
+            return False
+        centers.append((round(float(cx), 4), round(float(cy), 4)))
+    return len(set(centers)) == 1
+
+
 def execute_extrude_boss(model: Any, op: ExtrudeBossOperation) -> Any:
     """
     Ejecuta una operación de extrusión de saliente/base (FeatureExtrusion2)
     con los 23 parámetros exactos requeridos por SolidWorks 2018.
     - Soporta planos desfasados (plane_offset_mm) y extrusión simétrica (midplane / both_directions).
-    - Si la IA agrupa varias figuras cerradas que se solapan/cruzan en el mismo croquis
-      (ej. cilindro + brazo + orejas de brida), SolidWorks rechaza el croquis combinado
-      por contornos que se intersecan; en ese caso el motor elimina el croquis combinado y
-      extruye cada primitiva secuencialmente con Merge=True (unión booleana 3D automática).
+    - Si la IA agrupa varias figuras cerradas no concéntricas en el mismo croquis de saliente
+      (ej. cilindro + brazo + orejas de brida), las extruye directamente una por una con
+      Merge=True para que SolidWorks haga la unión booleana 3D sin fallar por contornos cruzados.
     """
+    depth_m = mm_to_m(op.depth_mm)
+    use_midplane = bool(op.midplane or op.both_directions)
+
+    # Si hay múltiples primitivas cerradas en distintas posiciones dentro de un extrude_boss,
+    # extruirlas una por una directamente evita el fallo de contornos auto-intersectantes en 2D.
+    if (
+        len(op.sketch.shapes) > 1
+        and _all_shapes_are_closed_primitives(op.sketch)
+        and not _are_concentric_shapes(op.sketch)
+    ):
+        feat = None
+        for shape in op.sketch.shapes:
+            sub_sketch = Sketch(shapes=[shape])
+            sub_sketch_name = build_sketch_on_plane(
+                model,
+                op.plane,
+                sub_sketch,
+                plane_offset_mm=op.plane_offset_mm,
+            )
+            feat = _extrude_single_sketch_boss(model, sub_sketch_name, depth_m, use_midplane)
+            if feat is None:
+                raise RuntimeError(
+                    f"Falló FeatureExtrusion2 al extruir figura '{shape.kind}' en el plano '{op.plane}'."
+                )
+        model.ClearSelection2(True)
+        return feat
+
     sketch_name = build_sketch_on_plane(
         model,
         op.plane,
@@ -144,12 +200,9 @@ def execute_extrude_boss(model: Any, op: ExtrudeBossOperation) -> Any:
         plane_offset_mm=op.plane_offset_mm,
     )
 
-    depth_m = mm_to_m(op.depth_mm)
-    use_midplane = bool(op.midplane or op.both_directions)
-
     feat = _extrude_single_sketch_boss(model, sketch_name, depth_m, use_midplane)
 
-    # Fallback de descomposición booleana 3D cuando hay múltiples figuras cerradas solapadas
+    # Fallback de descomposición booleana 3D si falló un croquis múltiple
     if feat is None and len(op.sketch.shapes) > 1 and _all_shapes_are_closed_primitives(op.sketch):
         _delete_sketch_silently(model, sketch_name)
         for shape in op.sketch.shapes:
@@ -226,10 +279,22 @@ def _cut_single_sketch(
     feat_mgr = model.FeatureManager
     feat = None
 
-    # 1. Si both_directions=True o through_all=True, probar primero hacia ambos lados (Sd=False).
+    # 1. Si both_directions=True o through_all=True, probar primero hacia ambos lados.
     #    Esto garantiza que si la pieza se extruyó con midplane=True, un corte pasante en el plano
     #    central atraviese AMBAS mitades del sólido y no solo una mitad.
-    if op.both_directions or op.through_all:
+    if op.through_all:
+        feat = _call_feature_cut3(
+            feat_mgr=feat_mgr,
+            sd=True,
+            reverse_dir=False,
+            end_cond_1=SW_END_COND_THROUGH_ALL_BOTH,
+            end_cond_2=SW_END_COND_BLIND,
+            depth_1_m=depth_m,
+        )
+        if feat is None and sketch_name:
+            select_by_id(model, sketch_name, "SKETCH", 0.0, 0.0, 0.0, append=False, mark=0)
+
+    if feat is None and (op.both_directions or op.through_all):
         feat = _call_feature_cut3(
             feat_mgr=feat_mgr,
             sd=False,
