@@ -28,10 +28,10 @@ Esta carpeta centraliza todo el conocimiento técnico, decisiones de arquitectur
 
 ## Estado Actual del Proyecto
 
-* **Fase 1 (Completada y Validada en Vivo):**
-  * Esquemas Pydantic en `schemas/cad_schema.py`.
+* **Fase 1 + Expansión Geométrica 80/20 (Completadas):**
+  * Esquemas Pydantic en `schemas/cad_schema.py` con **9 operaciones 3D** (`extrude_boss`, `extrude_cut`, `revolve_boss`, `revolve_cut`, `circular_pattern`, `linear_pattern`, `fillet`, `chamfer`, `shell`), **7 primitivas 2D** (`center_rectangle`, `corner_rectangle`, `circle`, `line`, `polygon`, `arc`, `slot`), **planos paralelos desfasados** (`plane_offset_mm`) y **corte bilateral** (`both_directions`).
   * Motor de ejecución local `sw_engine` conectado a SolidWorks 2018 (`connection.py`, `primitives.py`, `features.py`).
-  * Script de prueba `test_engine.py` validado en vivo construyendo la placa base de `100 x 50 x 8 mm` con 4 agujeros pasantes de `Ø6 mm`.
+  * Script de prueba `test_engine.py` y archivo de ejemplo `pieza.json` (`Cilindro_6_Ventanas_60mm`).
 * **Modo Chat sin API (Completado):**
   * Prompt maestro listo para copiar y pegar (`PROMPT_PARA_CHAT.txt`).
   * Ventana gráfica en `main.py` (y acceso directo `iniciar_sketch2solid.bat`) para copiar el prompt, pegar el JSON devuelto por cualquier IA, limpiarlo, validarlo con Pydantic y construirlo en SolidWorks 2018.

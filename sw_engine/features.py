@@ -1,17 +1,20 @@
 import math
 from typing import Any, Union
 from schemas.cad_schema import (
+    Arc,
     CADPart,
     ChamferOperation,
     CircularPatternOperation,
     ExtrudeBossOperation,
     ExtrudeCutOperation,
     FilletOperation,
+    Line,
     LinearPatternOperation,
     OperationType,
     RevolveBossOperation,
     RevolveCutOperation,
     ShellOperation,
+    Sketch,
 )
 from .connection import (
     com_call_0,
@@ -35,33 +38,23 @@ SW_END_COND_MID_PLANE = 6    # Plano medio
 SW_VIEW_ISOMETRIC = 7
 
 
-def execute_extrude_boss(model: Any, op: ExtrudeBossOperation) -> Any:
-    """
-    Ejecuta una operación de extrusión de saliente/base (FeatureExtrusion2)
-    con los 23 parámetros exactos requeridos por SolidWorks 2018.
-    Soporta planos desfasados (plane_offset_mm) y extrusión simétrica (midplane / both_directions).
-    """
-    sketch_name = build_sketch_on_plane(
-        model,
-        op.plane,
-        op.sketch,
-        plane_offset_mm=op.plane_offset_mm,
-    )
-
-    depth_m = mm_to_m(op.depth_mm)
-    use_midplane = bool(op.midplane or op.both_directions)
-    end_cond_1 = SW_END_COND_MID_PLANE if use_midplane else SW_END_COND_BLIND
-    single_dir = not use_midplane
-
-    feat_mgr = model.FeatureManager
-    feat = feat_mgr.FeatureExtrusion2(
-        bool(single_dir),  # 1. Sd: True = una dirección, False = plano medio / dos direcciones
+def _call_feature_extrusion2(
+    feat_mgr: Any,
+    sd: bool,
+    end_cond_1: int,
+    end_cond_2: int,
+    depth_1_m: float,
+    depth_2_m: float = 0.0,
+) -> Any:
+    """Invoca FeatureExtrusion2 con los 23 parámetros exactos de SolidWorks 2018."""
+    return feat_mgr.FeatureExtrusion2(
+        bool(sd),          # 1. Sd: True = una condición final (incluye MidPlane), False = dos direcciones independientes
         False,             # 2. Flip: invertir lado a cortar
         False,             # 3. Dir: invertir dirección de extrusión
         int(end_cond_1),   # 4. T1: condición final dirección 1
-        0,                 # 5. T2: condición final dirección 2
-        float(depth_m),    # 6. D1: profundidad dirección 1 (metros)
-        0.0,               # 7. D2: profundidad dirección 2 (metros)
+        int(end_cond_2),   # 5. T2: condición final dirección 2
+        float(depth_1_m),  # 6. D1: profundidad dirección 1 (metros)
+        float(depth_2_m),  # 7. D2: profundidad dirección 2 (metros)
         False,             # 8. Dchk1: ángulo de salida dir 1
         False,             # 9. Dchk2: ángulo de salida dir 2
         False,             # 10. Ddir1: ángulo de salida hacia adentro dir 1
@@ -79,6 +72,99 @@ def execute_extrude_boss(model: Any, op: ExtrudeBossOperation) -> Any:
         0.0,               # 22. StartOffset (metros)
         False,             # 23. FlipStartOffset
     )
+
+
+def _extrude_single_sketch_boss(
+    model: Any,
+    sketch_name: str,
+    depth_m: float,
+    use_midplane: bool,
+) -> Any:
+    """Intenta extruir un croquis ya cerrado y seleccionado (con fallback en plano medio)."""
+    feat_mgr = model.FeatureManager
+    end_cond_1 = SW_END_COND_MID_PLANE if use_midplane else SW_END_COND_BLIND
+
+    # IMPORTANTE: En SolidWorks 2018, swEndCondMidPlane (6) requiere Sd=True.
+    # Si se pasa Sd=False con D2=0.0, SolidWorks interpreta Dirección 2 con espesor 0 y falla.
+    feat = _call_feature_extrusion2(
+        feat_mgr=feat_mgr,
+        sd=True,
+        end_cond_1=end_cond_1,
+        end_cond_2=SW_END_COND_BLIND,
+        depth_1_m=depth_m,
+        depth_2_m=0.0,
+    )
+
+    if feat is None and use_midplane and sketch_name:
+        select_by_id(model, sketch_name, "SKETCH", 0.0, 0.0, 0.0, append=False, mark=0)
+        feat = _call_feature_extrusion2(
+            feat_mgr=feat_mgr,
+            sd=False,
+            end_cond_1=SW_END_COND_BLIND,
+            end_cond_2=SW_END_COND_BLIND,
+            depth_1_m=depth_m / 2.0,
+            depth_2_m=depth_m / 2.0,
+        )
+
+    return feat
+
+
+def _delete_sketch_silently(model: Any, sketch_name: str) -> None:
+    """Elimina un croquis fallido del árbol para no dejar geometría huérfana."""
+    if not sketch_name:
+        return
+    try:
+        model.ClearSelection2(True)
+        if select_by_id(model, sketch_name, "SKETCH", 0.0, 0.0, 0.0, append=False, mark=0):
+            model.Extension.DeleteSelection2(0)
+        model.ClearSelection2(True)
+    except Exception:
+        pass
+
+
+def _all_shapes_are_closed_primitives(sketch: Sketch) -> bool:
+    """Indica si todas las figuras del croquis son primitivas cerradas independientes."""
+    return all(not isinstance(s, (Line, Arc)) for s in sketch.shapes)
+
+
+def execute_extrude_boss(model: Any, op: ExtrudeBossOperation) -> Any:
+    """
+    Ejecuta una operación de extrusión de saliente/base (FeatureExtrusion2)
+    con los 23 parámetros exactos requeridos por SolidWorks 2018.
+    - Soporta planos desfasados (plane_offset_mm) y extrusión simétrica (midplane / both_directions).
+    - Si la IA agrupa varias figuras cerradas que se solapan/cruzan en el mismo croquis
+      (ej. cilindro + brazo + orejas de brida), SolidWorks rechaza el croquis combinado
+      por contornos que se intersecan; en ese caso el motor elimina el croquis combinado y
+      extruye cada primitiva secuencialmente con Merge=True (unión booleana 3D automática).
+    """
+    sketch_name = build_sketch_on_plane(
+        model,
+        op.plane,
+        op.sketch,
+        plane_offset_mm=op.plane_offset_mm,
+    )
+
+    depth_m = mm_to_m(op.depth_mm)
+    use_midplane = bool(op.midplane or op.both_directions)
+
+    feat = _extrude_single_sketch_boss(model, sketch_name, depth_m, use_midplane)
+
+    # Fallback de descomposición booleana 3D cuando hay múltiples figuras cerradas solapadas
+    if feat is None and len(op.sketch.shapes) > 1 and _all_shapes_are_closed_primitives(op.sketch):
+        _delete_sketch_silently(model, sketch_name)
+        for shape in op.sketch.shapes:
+            sub_sketch = Sketch(shapes=[shape])
+            sub_sketch_name = build_sketch_on_plane(
+                model,
+                op.plane,
+                sub_sketch,
+                plane_offset_mm=op.plane_offset_mm,
+            )
+            feat = _extrude_single_sketch_boss(model, sub_sketch_name, depth_m, use_midplane)
+            if feat is None:
+                raise RuntimeError(
+                    f"Falló FeatureExtrusion2 al descomponer figura '{shape.kind}' en el plano '{op.plane}'."
+                )
 
     if feat is None:
         raise RuntimeError(
@@ -129,29 +215,21 @@ def _call_feature_cut3(
     )
 
 
-def execute_extrude_cut(model: Any, op: ExtrudeCutOperation) -> Any:
-    """
-    Ejecuta una operación de corte extruido (FeatureCut3) en SolidWorks 2018.
-    - Soporta planos paralelos desfasados (plane_offset_mm).
-    - Si both_directions=True, corta hacia ambos lados desde el plano del croquis
-      (Sd=False, T1/T2=ThroughAll o Blind).
-    - Si both_directions=False, prueba ambas orientaciones normales y hace fallback a Sd=False.
-    """
-    sketch_name = build_sketch_on_plane(
-        model,
-        op.plane,
-        op.sketch,
-        plane_offset_mm=op.plane_offset_mm,
-    )
-
-    end_cond_1 = SW_END_COND_THROUGH_ALL if op.through_all else SW_END_COND_BLIND
-    depth_m = mm_to_m(op.depth_mm) if op.depth_mm is not None else 0.01
-
+def _cut_single_sketch(
+    model: Any,
+    sketch_name: str,
+    op: ExtrudeCutOperation,
+    end_cond_1: int,
+    depth_m: float,
+) -> Any:
+    """Ejecuta FeatureCut3 sobre un croquis cerrado probando las direcciones válidas."""
     feat_mgr = model.FeatureManager
     feat = None
 
-    # 1. Si both_directions=True, cortar hacia ambos lados (Sd=False, T2=end_cond_1) primero
-    if op.both_directions:
+    # 1. Si both_directions=True o through_all=True, probar primero hacia ambos lados (Sd=False).
+    #    Esto garantiza que si la pieza se extruyó con midplane=True, un corte pasante en el plano
+    #    central atraviese AMBAS mitades del sólido y no solo una mitad.
+    if op.both_directions or op.through_all:
         feat = _call_feature_cut3(
             feat_mgr=feat_mgr,
             sd=False,
@@ -187,18 +265,58 @@ def execute_extrude_cut(model: Any, op: ExtrudeCutOperation) -> Any:
             depth_1_m=depth_m,
         )
 
-    # 4. Si es pasante (through_all) y aún no cortó, cortar hacia ambos lados (Sd=False)
-    if feat is None and op.through_all and not op.both_directions and sketch_name:
+    # 4. Si es un corte ciego desde un plano central y fallaron las direcciones simples, probar Plano Medio
+    if feat is None and not op.through_all and sketch_name:
         select_by_id(model, sketch_name, "SKETCH", 0.0, 0.0, 0.0, append=False, mark=0)
         feat = _call_feature_cut3(
             feat_mgr=feat_mgr,
-            sd=False,
+            sd=True,
             reverse_dir=False,
-            end_cond_1=SW_END_COND_THROUGH_ALL,
-            end_cond_2=SW_END_COND_THROUGH_ALL,
+            end_cond_1=SW_END_COND_MID_PLANE,
+            end_cond_2=SW_END_COND_BLIND,
             depth_1_m=depth_m,
-            depth_2_m=depth_m,
         )
+
+    return feat
+
+
+def execute_extrude_cut(model: Any, op: ExtrudeCutOperation) -> Any:
+    """
+    Ejecuta una operación de corte extruido (FeatureCut3) en SolidWorks 2018.
+    - Soporta planos paralelos desfasados (plane_offset_mm).
+    - Si both_directions=True o through_all=True, intenta primero cortar hacia ambos lados (Sd=False)
+      para atravesar piezas simétricas (midplane=True) de lado a lado, con fallback a una dirección.
+    - Si hay múltiples primitivas cerradas solapadas que fallan como croquis único,
+      descompone el corte automáticamente figura por figura.
+    """
+    sketch_name = build_sketch_on_plane(
+        model,
+        op.plane,
+        op.sketch,
+        plane_offset_mm=op.plane_offset_mm,
+    )
+
+    end_cond_1 = SW_END_COND_THROUGH_ALL if op.through_all else SW_END_COND_BLIND
+    depth_m = mm_to_m(op.depth_mm) if op.depth_mm is not None else 0.01
+
+    feat = _cut_single_sketch(model, sketch_name, op, end_cond_1, depth_m)
+
+    # Fallback de descomposición booleana si múltiples figuras de corte se solapan en el croquis
+    if feat is None and len(op.sketch.shapes) > 1 and _all_shapes_are_closed_primitives(op.sketch):
+        _delete_sketch_silently(model, sketch_name)
+        for shape in op.sketch.shapes:
+            sub_sketch = Sketch(shapes=[shape])
+            sub_sketch_name = build_sketch_on_plane(
+                model,
+                op.plane,
+                sub_sketch,
+                plane_offset_mm=op.plane_offset_mm,
+            )
+            feat = _cut_single_sketch(model, sub_sketch_name, op, end_cond_1, depth_m)
+            if feat is None:
+                raise RuntimeError(
+                    f"Falló FeatureCut3 al descomponer figura '{shape.kind}' en el plano '{op.plane}'."
+                )
 
     if feat is None:
         raise RuntimeError(

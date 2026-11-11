@@ -1,12 +1,12 @@
 {
-  "part_name": "Cilindro_6_Ventanas_60mm",
+  "part_name": "Soporte_Abrazadera_Brida",
   "operations": [
     {
       "type": "extrude_boss",
       "plane": "Top",
       "plane_offset_mm": 0.0,
-      "depth_mm": 35.0,
-      "midplane": false,
+      "depth_mm": 20.0,
+      "midplane": true,
       "both_directions": false,
       "sketch": {
         "shapes": [
@@ -15,6 +15,31 @@
             "cx": 0.0,
             "cy": 0.0,
             "diameter": 60.0
+          },
+          {
+            "kind": "corner_rectangle",
+            "x1": -40.0,
+            "y1": -6.0,
+            "x2": 0.0,
+            "y2": 6.0
+          },
+          {
+            "kind": "circle",
+            "cx": -40.0,
+            "cy": 0.0,
+            "diameter": 20.0
+          },
+          {
+            "kind": "circle",
+            "cx": 32.48,
+            "cy": 18.75,
+            "diameter": 16.0
+          },
+          {
+            "kind": "circle",
+            "cx": 0.0,
+            "cy": -37.5,
+            "diameter": 16.0
           }
         ]
       }
@@ -32,7 +57,25 @@
             "kind": "circle",
             "cx": 0.0,
             "cy": 0.0,
-            "diameter": 56.0
+            "diameter": 50.0
+          },
+          {
+            "kind": "circle",
+            "cx": 32.48,
+            "cy": 18.75,
+            "diameter": 10.0
+          },
+          {
+            "kind": "circle",
+            "cx": 0.0,
+            "cy": -37.5,
+            "diameter": 10.0
+          },
+          {
+            "kind": "circle",
+            "cx": -40.0,
+            "cy": 0.0,
+            "diameter": 8.0
           }
         ]
       }
@@ -43,25 +86,37 @@
       "plane_offset_mm": 0.0,
       "through_all": false,
       "both_directions": false,
-      "depth_mm": 40.0,
+      "depth_mm": 10.0,
       "sketch": {
         "shapes": [
           {
             "kind": "center_rectangle",
-            "cx": 0.0,
-            "cy": 17.5,
-            "width": 14.0,
-            "height": 22.0
+            "cx": -15.0,
+            "cy": 0.0,
+            "width": 65.0,
+            "height": 10.0
           }
         ]
       }
     },
     {
-      "type": "circular_pattern",
-      "instances": 6,
-      "angle_deg": 360.0,
-      "axis": "Y",
-      "equal_spacing": true
+      "type": "extrude_cut",
+      "plane": "Top",
+      "plane_offset_mm": 0.0,
+      "through_all": true,
+      "both_directions": false,
+      "depth_mm": null,
+      "sketch": {
+        "shapes": [
+          {
+            "kind": "corner_rectangle",
+            "x1": -55.0,
+            "y1": -1.0,
+            "x2": 0.0,
+            "y2": 1.0
+          }
+        ]
+      }
     }
   ]
 }

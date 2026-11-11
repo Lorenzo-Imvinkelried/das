@@ -174,16 +174,24 @@ bloque SAMPLE_PART_JSON dentro del archivo test_engine.py (puedes abrirlo con el
 Bloc de notas, VS Code o cualquier editor de texto).
 
 Opciones que soporta actualmente schemas/cad_schema.py (todo en milimetros):
-  - Planos ("plane"): "Front", "Top" o "Right"
-  - Operaciones ("type"):
-      * "extrude_boss": pide "depth_mm" (y opcional "midplane": true/false)
-      * "extrude_cut": pide "through_all": true (o "through_all": false y
-        "depth_mm": valor)
-  - Figuras dentro de "sketch" -> "shapes" ("kind"):
+  - Planos ("plane"): "Front", "Top" o "Right" (mas "plane_offset_mm" opcional)
+  - 9 Operaciones 3D ("type"):
+      * "extrude_boss": "depth_mm", opcionales "midplane", "both_directions", "plane_offset_mm"
+      * "extrude_cut": "through_all", "depth_mm", opcionales "both_directions", "plane_offset_mm"
+      * "revolve_boss" y "revolve_cut": "angle_deg", "axis_line" (x1, y1, x2, y2)
+      * "circular_pattern": "instances", "angle_deg", "axis" ("X", "Y" o "Z")
+      * "linear_pattern": "instances_x", "spacing_x_mm", "instances_y", "spacing_y_mm"
+      * "fillet": "radius_mm"
+      * "chamfer": "distance_mm", "angle_deg"
+      * "shell": "thickness_mm", "open_face" ("Top", "Bottom", "Front", "Back", "Right", "Left")
+  - 7 Figuras 2D dentro de "sketch" -> "shapes" ("kind"):
       * "center_rectangle": cx, cy, width, height
       * "corner_rectangle": x1, y1, x2, y2
       * "circle": cx, cy, diameter
       * "line": x1, y1, x2, y2
+      * "polygon": cx, cy, diameter, sides, inscribed
+      * "arc": cx, cy, x1, y1, x2, y2, direction (1 o -1)
+      * "slot": x1, y1, x2, y2, width
 
 Guardas los cambios en test_engine.py y vuelves a correr:
   .\.venv\Scripts\python.exe test_engine.py

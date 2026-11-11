@@ -8,6 +8,7 @@ Tu tarea es analizar la imagen adjunta de un croquis o plano 2D/3D (y cualquier 
    - Si una cota dice `"Ø15"`, usa `"diameter": 15.0`.
 3. **Estrategia Constructiva:**
    - **Piezas prismáticas:** Crea el volumen principal con `"extrude_boss"`, agrega salientes secundarios (usando `"plane_offset_mm"` si nacen sobre una cara desplazada) y realiza agujeros con `"extrude_cut"`.
+   - **Regla de contornos que se solapan:** Si un cuerpo está compuesto por varias primitivas que se cruzan o superponen (ej. cilindro base + brazo rectangular + orejas laterales), colócalas en operaciones `"extrude_boss"` sucesivas (que SolidWorks fusiona en 3D) en lugar de mezclarlas en un único croquis con líneas que se cruzan.
    - **Piezas de revolución (ejes, poleas, conos, bujes):** Usa `"revolve_boss"` o `"revolve_cut"` dibujando medio perfil cerrado de un lado de `"axis_line"`.
    - **Cortes radiales o patrones circulares:** Para hacer $N$ ventanas o agujeros radiales en un cilindro, haz **un solo** `"extrude_cut"` desde un plano central (con `"through_all": false, "depth_mm": radio_exterior + 10` para cortar una sola pared, o `"both_directions": true` si quieres atravesar ambas paredes) e inmediatamente agrega una operación `"circular_pattern"` con `"instances": N` y `"axis": "Y"` (si el cilindro se extruyó en `"Top"`), `"Z"` (si se extruyó en `"Front"`) o `"X"` (si se extruyó en `"Right"`).
 

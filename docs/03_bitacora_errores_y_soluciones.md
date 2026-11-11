@@ -80,3 +80,26 @@ Este documento registra cada problema real encontrado durante la construcción y
   3. Se invirtió el orden de prueba en `execute_extrude_cut` (`reverse_dir=True` primero) para cortar en la misma dirección `+Normal` del saliente sin generar errores de reconstrucción intermedios.
   4. En `main.py`, se libera `del model` + `gc.collect()` inmediatamente al finalizar la construcción.
 
+---
+
+## Incidente #7: Selección de `IFace2`/`IEdge` en Late-Binding y Retorno `VT_VOID` en `FeatureFillet` / `FeatureChamfer` / `InsertFeatureShell`
+* **Síntoma Preventivo Detectado en TypeLib (`v26.0`):**
+  1. En SolidWorks 2018 COM, las interfaces `IFace2` (`{4A8BA4D8-DA25-4B75-8E2D-4922B74D81ED}`) e `IEdge` (`{83A33D42-27C5-11CE-BFD4-00400513BB57}`) **no exponen** `Select2()` ni `Select4()` en su interfaz `IDispatch` por defecto; dichos métodos pertenecen a la interfaz separada `IEntity` (`{83A33D65-27C5-11CE-BFD4-00400513BB57}`). Llamar `edge.Select2(True, 1)` o `face.Select2(False, 1)` desde `pywin32` en late-binding arroja error de miembro inexistente.
+  2. Además, `IModelDoc2.FeatureFillet`, `IModelDoc2.FeatureChamfer` e `IModelDoc2.InsertFeatureShell` están declarados con tipo de retorno `ret=24` (`VT_VOID`), por lo que en Python siempre devuelven `None` aunque la operación 3D se haya creado con éxito.
+* **Solución Aplicada:**
+  1. Se implementó [`select_entity`](file:///d:/Usuario/Desktop/sketch2solid/sw_engine/connection.py#L229-L256) en `sw_engine/connection.py`, que selecciona cualquier objeto geométrico (`IFace2`, `IEdge`) a través de `model.SelectionManager.AddSelectionListObject(entity_obj, sel_data)` junto con `com_call_0(sel_mgr, "CreateSelectData")` (`sel_data.Mark = mark`).
+  2. En [`execute_fillet`](file:///d:/Usuario/Desktop/sketch2solid/sw_engine/features.py#L375-L407), [`execute_chamfer`](file:///d:/Usuario/Desktop/sketch2solid/sw_engine/features.py#L410-L433) y [`execute_shell`](file:///d:/Usuario/Desktop/sketch2solid/sw_engine/features.py#L436-L497), se verifica la creación comprobando que `get_last_solid_feature_name(model)` haya cambiado tras la llamada COM.
+
+---
+
+## Incidente #8: `Falló FeatureExtrusion2 para el croquis 'Sketch1' en el plano 'Top'` en `Soporte_Abrazadera_Brida`
+* **Síntoma:** Al intentar construir `Soporte_Abrazadera_Brida` (`pieza.json`), arrojó error en la primera operación `extrude_boss` sobre el plano `Top`.
+* **Causa Raíz Doble:**
+  1. **Parámetro `Sd` en Plano Medio (`midplane: true`):** En `FeatureExtrusion2`, cuando `T1 = 6` (`swEndCondMidPlane`), el primer parámetro `Sd` (`SingleDir`) **debe ser `True`**. Al pasar `Sd = False` con `D2 = 0.0`, SolidWorks activaba la Dirección 2 con profundidad `0.0 m` e invalidaba la extrusión de plano medio.
+  2. **Contornos 2D solapados en un mismo croquis (`Sketch1`):** La IA colocó 5 primitivas que se intersectaban entre sí dentro del mismo `Sketch1` (un círculo central de `Ø60`, un rectángulo de `-40` a `0`, un círculo de `Ø20` en `(-40, 0)` y dos orejas de `Ø16` en `(32.48, 18.75)` y `(0, -37.5)`). En SolidWorks, un croquis con contornos cerrados cuyas líneas se cruzan sin recortar (`TrimEntities`) es rechazado por `FeatureExtrusion2` por tener regiones auto-intersectantes.
+  3. **Cortes pasantes (`through_all: true`) sobre piezas con `midplane: true`:** Cuando el sólido base se extruye con `midplane: true`, el plano base queda en la mitad del sólido (`Y = 0`). Si un `extrude_cut` posterior con `through_all: true` corta en una sola dirección (`Sd = True`), solo perfora la mitad del espesor.
+* **Solución Aplicada:**
+  1. En `_extrude_single_sketch_boss` (`sw_engine/features.py`), se corrigió `sd=True` para `SW_END_COND_MID_PLANE` (con fallback a `sd=False` y `depth_m / 2.0` hacia cada lado).
+  2. Se implementó **Descomposición Booleana 3D Automática** en `execute_extrude_boss` y `execute_extrude_cut`: si un croquis con múltiples figuras cerradas (`Circle`, `CenterRectangle`, `CornerRectangle`, `Polygon`, `Slot`) falla porque sus contornos se solapan, el motor elimina el croquis combinado huérfano (`DeleteSelection2(0)`) y extruye/corta cada figura secuencialmente con `Merge = True`, logrando que el kernel Parasolid de SolidWorks las una en un único sólido 3D limpio sin necesidad de recortar líneas 2D.
+  3. En `_cut_single_sketch`, cuando `through_all=True` o `both_directions=True`, se prueba primero `sd=False` (corte hacia ambos lados del plano) para atravesar piezas simétricas completas.
+
