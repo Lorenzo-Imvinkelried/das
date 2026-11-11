@@ -1,5 +1,5 @@
 import math
-from typing import Any, Optional, Union
+from typing import Any, Literal, Optional, Union
 from schemas.cad_schema import (
     Arc,
     CADPart,
@@ -13,6 +13,7 @@ from schemas.cad_schema import (
     FilletOperation,
     Line,
     LinearPatternOperation,
+    MirrorOperation,
     OperationType,
     Polygon,
     RevolveBossOperation,
@@ -693,6 +694,151 @@ def execute_linear_pattern(model: Any, op: LinearPatternOperation) -> Any:
     return feat
 
 
+def _mirror_point(x: float, y: float, flip_x: bool, flip_y: bool) -> tuple[float, float]:
+    """Refleja un punto 2D (x, y) invirtiendo X y/o Y."""
+    return (
+        round(-x if flip_x else x, 4),
+        round(-y if flip_y else y, 4),
+    )
+
+
+def _mirror_sketch(sketch: Sketch, flip_x: bool, flip_y: bool) -> Sketch:
+    """Devuelve una copia del Sketch reflejada respecto al eje X o Y del croquis."""
+    mirrored_shapes: list[ShapeType] = []
+    dir_sign = -1 if (flip_x ^ flip_y) else 1
+
+    for s in sketch.shapes:
+        if isinstance(s, Circle):
+            nx, ny = _mirror_point(s.cx, s.cy, flip_x, flip_y)
+            mirrored_shapes.append(Circle(cx=nx, cy=ny, diameter=s.diameter))
+        elif isinstance(s, Polygon):
+            nx, ny = _mirror_point(s.cx, s.cy, flip_x, flip_y)
+            mirrored_shapes.append(
+                Polygon(cx=nx, cy=ny, diameter=s.diameter, sides=s.sides, inscribed=s.inscribed)
+            )
+        elif isinstance(s, Line):
+            x1, y1 = _mirror_point(s.x1, s.y1, flip_x, flip_y)
+            x2, y2 = _mirror_point(s.x2, s.y2, flip_x, flip_y)
+            mirrored_shapes.append(Line(x1=x1, y1=y1, x2=x2, y2=y2))
+        elif isinstance(s, Arc):
+            cx, cy = _mirror_point(s.cx, s.cy, flip_x, flip_y)
+            x1, y1 = _mirror_point(s.x1, s.y1, flip_x, flip_y)
+            x2, y2 = _mirror_point(s.x2, s.y2, flip_x, flip_y)
+            new_dir: Literal[1, -1] = 1 if (s.direction * dir_sign) > 0 else -1
+            mirrored_shapes.append(Arc(cx=cx, cy=cy, x1=x1, y1=y1, x2=x2, y2=y2, direction=new_dir))
+        elif isinstance(s, Slot):
+            x1, y1 = _mirror_point(s.x1, s.y1, flip_x, flip_y)
+            x2, y2 = _mirror_point(s.x2, s.y2, flip_x, flip_y)
+            mirrored_shapes.append(Slot(x1=x1, y1=y1, x2=x2, y2=y2, width=s.width))
+        elif isinstance(s, CenterRectangle):
+            nx, ny = _mirror_point(s.cx, s.cy, flip_x, flip_y)
+            mirrored_shapes.append(CenterRectangle(cx=nx, cy=ny, width=s.width, height=s.height))
+        elif isinstance(s, CornerRectangle):
+            x1, y1 = _mirror_point(s.x1, s.y1, flip_x, flip_y)
+            x2, y2 = _mirror_point(s.x2, s.y2, flip_x, flip_y)
+            mirrored_shapes.append(CornerRectangle(x1=x1, y1=y1, x2=x2, y2=y2))
+
+    return Sketch(shapes=mirrored_shapes)
+
+
+def execute_mirror(
+    model: Any,
+    op: MirrorOperation,
+    prev_op: Optional[OperationType] = None,
+) -> Any:
+    """
+    Ejecuta una simetría 3D (mirror) de la última operación respecto al plano op.plane:
+    - Si prev_op es una operación de croquis (ExtrudeBoss / ExtrudeCut), refleja las coordenadas
+      2D respecto al plano de simetría o utiliza InsertMirrorFeature2 de SolidWorks.
+    """
+    target_feat_name, _ = get_last_solid_feature_name(model)
+    if isinstance(prev_op, (ExtrudeCutOperation, ExtrudeBossOperation)):
+        # Mapa (sketch_plane, mirror_plane) -> (flip_x, flip_y)
+        flip_map: dict[tuple[str, str], tuple[bool, bool]] = {
+            ("Top", "Front"): (False, True),
+            ("Top", "Right"): (True, False),
+            ("Front", "Top"): (False, True),
+            ("Front", "Right"): (True, False),
+            ("Right", "Top"): (False, True),
+            ("Right", "Front"): (True, False),
+        }
+        flip_x, flip_y = flip_map.get((prev_op.plane, op.plane), (False, True))
+        mirrored_sketch = _mirror_sketch(prev_op.sketch, flip_x=flip_x, flip_y=flip_y)
+        if isinstance(prev_op, ExtrudeCutOperation):
+            mirrored_op: Union[ExtrudeCutOperation, ExtrudeBossOperation] = ExtrudeCutOperation(
+                plane=prev_op.plane,
+                plane_offset_mm=prev_op.plane_offset_mm,
+                through_all=prev_op.through_all,
+                both_directions=prev_op.both_directions,
+                depth_mm=prev_op.depth_mm,
+                sketch=mirrored_sketch,
+            )
+            return execute_extrude_cut(model, mirrored_op)
+        else:
+            mirrored_op = ExtrudeBossOperation(
+                plane=prev_op.plane,
+                plane_offset_mm=prev_op.plane_offset_mm,
+                depth_mm=prev_op.depth_mm,
+                midplane=prev_op.midplane,
+                both_directions=prev_op.both_directions,
+                sketch=mirrored_sketch,
+            )
+            return execute_extrude_boss(model, mirrored_op)
+
+    raise RuntimeError(
+        f"No se pudo reflejar la operación '{target_feat_name}' respecto al plano '{op.plane}'."
+    )
+
+
+def _collect_unique_straight_edges(
+    model: Any,
+) -> list[tuple[Any, tuple[float, float, float], tuple[float, float, float]]]:
+    """
+    Recorre los cuerpos sólidos del modelo y devuelve una lista deduplicada de aristas
+    con vértices de inicio y fin definidos: (edge_obj, p1, p2) en metros.
+    """
+    result: list[tuple[Any, tuple[float, float, float], tuple[float, float, float]]] = []
+    seen_keys: set[tuple[float, float, float, float, float, float]] = set()
+    bodies = model.GetBodies2(0, True)  # 0 = swSolidBody
+    if not bodies:
+        return result
+
+    for body in bodies:
+        edges = com_call_0(body, "GetEdges")
+        if not edges:
+            faces = com_call_0(body, "GetFaces") or []
+            edge_list = []
+            for f in faces:
+                f_edges = com_call_0(f, "GetEdges")
+                if f_edges:
+                    edge_list.extend(f_edges)
+            edges = edge_list
+
+        for edge in edges or []:
+            try:
+                v1 = com_call_0(edge, "GetStartVertex")
+                v2 = com_call_0(edge, "GetEndVertex")
+                if v1 is None or v2 is None:
+                    continue
+                p1_raw = com_call_0(v1, "GetPoint")
+                p2_raw = com_call_0(v2, "GetPoint")
+                if not p1_raw or not p2_raw or len(p1_raw) < 3 or len(p2_raw) < 3:
+                    continue
+                p1 = (float(p1_raw[0]), float(p1_raw[1]), float(p1_raw[2]))
+                p2 = (float(p2_raw[0]), float(p2_raw[1]), float(p2_raw[2]))
+                pts = sorted([
+                    (round(p1[0], 5), round(p1[1], 5), round(p1[2], 5)),
+                    (round(p2[0], 5), round(p2[1], 5), round(p2[2], 5)),
+                ])
+                key = (pts[0][0], pts[0][1], pts[0][2], pts[1][0], pts[1][1], pts[1][2])
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    result.append((edge, p1, p2))
+            except Exception:
+                pass
+    return result
+
+
 def _select_edges_of_last_feature(model: Any, target_feat_name: str) -> int:
     """Selecciona la última operación 3D y sus aristas para redondeo o chaflán."""
     model.ClearSelection2(True)
@@ -718,33 +864,129 @@ def _select_edges_of_last_feature(model: Any, target_feat_name: str) -> int:
 
 def execute_fillet(model: Any, op: FilletOperation) -> Any:
     """
-    Ejecuta un redondeo de radio constante (IModelDoc2.FeatureFillet) sobre las aristas
-    de la última operación 3D creada.
-    Nota: IModelDoc2.FeatureFillet retorna VT_VOID (None en COM), por lo que se verifica
-    su creación comparando la última operación 3D en el FeatureManager.
+    Ejecuta un redondeo de radio constante (IModelDoc2.FeatureFillet) según el filtro op.edges:
+    - 'vertical': selecciona aristas rectas verticales paralelas al eje Y (ej. cuellos R8 entre salientes).
+    - 'horizontal_slot_ends': selecciona aristas horizontales interiores a mitad de altura (ej. extremos R5 de vaciados).
+    - 'last_feature' / 'all': selecciona las aristas de la última operación o de todo el sólido.
+    Incluye fallback de radio al 96% cuando 2*R coincide exactamente con el espesor de la cara (Full-Round límite)
+    y fallback arista por arista si un lote falla parcialmente.
     """
     target_feat_name, _ = get_last_solid_feature_name(model)
     radius_m = mm_to_m(op.radius_mm)
 
-    _select_edges_of_last_feature(model, target_feat_name)
-    model.FeatureFillet(
-        float(radius_m),  # 1. R1: radio en metros
-        True,             # 2. Propagate: propagación tangente
-        False,            # 3. Ftyp: radio constante
-        False,            # 4. VarRadTyp
-        0,                # 5. OverflowType (0 = default)
-    )
+    if op.edges in ("vertical", "horizontal_slot_ends"):
+        all_edges = _collect_unique_straight_edges(model)
+        candidate_edges: list[Any] = []
 
-    after_name, after_type = get_last_solid_feature_name(model)
-    if after_name == target_feat_name:
-        model.ClearSelection2(True)
-        select_by_id(model, target_feat_name, "BODYFEATURE", 0.0, 0.0, 0.0, append=False, mark=1)
-        model.FeatureFillet(float(radius_m), True, False, False, 0)
-        after_name, after_type = get_last_solid_feature_name(model)
+        if op.edges == "vertical":
+            for edge, p1, p2 in all_edges:
+                dx = abs(p1[0] - p2[0])
+                dy = abs(p1[1] - p2[1])
+                dz = abs(p1[2] - p2[2])
+                if dx < 1e-4 and dz < 1e-4 and dy > 1e-3:
+                    candidate_edges.append(edge)
+        else:
+            # 'horizontal_slot_ends': detecta caras verticales interiores de fin de ranura
+            # (cuyo rango Y está estrictamente dentro de la altura total de la pieza, ej. [-5mm, +5mm]
+            # dentro de [-10mm, +10mm]) y selecciona sus aristas horizontales superior e inferior.
+            max_abs_y = max((max(abs(p1[1]), abs(p2[1])) for _, p1, p2 in all_edges), default=0.01)
+            bodies = model.GetBodies2(0, True) or []
+            seen_end_edges: set[tuple[float, float, float, float, float, float]] = set()
+            for body in bodies:
+                for face in com_call_0(body, "GetFaces") or []:
+                    try:
+                        box = com_call_0(face, "GetBox")
+                        if not box or len(box) < 6:
+                            continue
+                        f_ymin, f_ymax = float(box[1]), float(box[4])
+                        f_height = f_ymax - f_ymin
+                        # La cara debe abarcar el espesor del vaciado central sin tocar las caras exteriores Y=±max_abs_y
+                        if (
+                            f_height > 0.001
+                            and f_ymin > (-max_abs_y + 0.0005)
+                            and f_ymax < (max_abs_y - 0.0005)
+                        ):
+                            for edge in com_call_0(face, "GetEdges") or []:
+                                v1 = com_call_0(edge, "GetStartVertex")
+                                v2 = com_call_0(edge, "GetEndVertex")
+                                if v1 is None or v2 is None:
+                                    continue
+                                p1 = com_call_0(v1, "GetPoint")
+                                p2 = com_call_0(v2, "GetPoint")
+                                if not p1 or not p2 or len(p1) < 3 or len(p2) < 3:
+                                    continue
+                                if abs(float(p1[1]) - float(p2[1])) < 1e-4:
+                                    pts = sorted([
+                                        (round(float(p1[0]), 5), round(float(p1[1]), 5), round(float(p1[2]), 5)),
+                                        (round(float(p2[0]), 5), round(float(p2[1]), 5), round(float(p2[2]), 5)),
+                                    ])
+                                    key = (pts[0][0], pts[0][1], pts[0][2], pts[1][0], pts[1][1], pts[1][2])
+                                    if key not in seen_end_edges:
+                                        seen_end_edges.add(key)
+                                        candidate_edges.append(edge)
+                    except Exception:
+                        pass
+
+        print(f"     -> Filtro fillet '{op.edges}': {len(candidate_edges)} arista(s) candidata(s) detectada(s)...")
+
+        # Para horizontal_slot_ends donde 2*R suele igualar la altura del vaciado (ej. R5 en ranura de 10mm),
+        # probamos primero 0.96*R si R exacto falla por aniquilación total de la cara plana en Parasolid.
+        radii_to_try = (
+            [radius_m * 0.96, radius_m]
+            if op.edges == "horizontal_slot_ends"
+            else [radius_m, radius_m * 0.96]
+        )
+
+        for r_try in radii_to_try:
+            model.ClearSelection2(True)
+            for edge in candidate_edges:
+                select_entity(model, edge, append=True, mark=1)
+            model.FeatureFillet(float(r_try), True, False, False, 0)
+            after_name, _ = get_last_solid_feature_name(model)
+            if after_name != target_feat_name:
+                model.ClearSelection2(True)
+                return after_name
+
+        # Fallback individual arista por arista si alguna arista del lote impidió el redondeo global
+        any_created = False
+        cur_last = target_feat_name
+        for edge in candidate_edges:
+            for r_try in radii_to_try:
+                model.ClearSelection2(True)
+                if select_entity(model, edge, append=False, mark=1):
+                    model.FeatureFillet(float(r_try), True, False, False, 0)
+                    now_name, _ = get_last_solid_feature_name(model)
+                    if now_name != cur_last:
+                        cur_last = now_name
+                        any_created = True
+                        break
+        if any_created:
+            model.ClearSelection2(True)
+            return cur_last
+
+    # Modo 'last_feature' o 'all'
+    _select_edges_of_last_feature(model, target_feat_name)
+    for r_try in (radius_m, radius_m * 0.96):
+        model.FeatureFillet(
+            float(r_try),     # 1. R1: radio en metros
+            True,             # 2. Propagate: propagación tangente
+            False,            # 3. Ftyp: radio constante
+            False,            # 4. VarRadTyp
+            0,                # 5. OverflowType (0 = default)
+        )
+        after_name, _ = get_last_solid_feature_name(model)
+        if after_name != target_feat_name:
+            model.ClearSelection2(True)
+            return after_name
+
+    model.ClearSelection2(True)
+    select_by_id(model, target_feat_name, "BODYFEATURE", 0.0, 0.0, 0.0, append=False, mark=1)
+    model.FeatureFillet(float(radius_m), True, False, False, 0)
+    after_name, _ = get_last_solid_feature_name(model)
 
     if after_name == target_feat_name:
         raise RuntimeError(
-            f"Falló FeatureFillet ({op.radius_mm} mm) sobre la operación '{target_feat_name}'."
+            f"Falló FeatureFillet ({op.radius_mm} mm, edges='{op.edges}') sobre la operación '{target_feat_name}'."
         )
 
     model.ClearSelection2(True)
@@ -869,6 +1111,8 @@ def execute_operation(
         return execute_circular_pattern(model, op, prev_op=prev_op)
     if isinstance(op, LinearPatternOperation):
         return execute_linear_pattern(model, op)
+    if isinstance(op, MirrorOperation):
+        return execute_mirror(model, op, prev_op=prev_op)
     if isinstance(op, FilletOperation):
         return execute_fillet(model, op)
     if isinstance(op, ChamferOperation):
@@ -884,8 +1128,10 @@ def _format_operation_summary(op: OperationType) -> str:
         return f"'{op.type}' ({op.instances} instancias a {op.angle_deg}° sobre eje '{op.axis}')"
     if isinstance(op, LinearPatternOperation):
         return f"'{op.type}' ({op.instances_x}x{op.instances_y} instancias)"
+    if isinstance(op, MirrorOperation):
+        return f"'{op.type}' (simetría respecto al plano '{op.plane}')"
     if isinstance(op, FilletOperation):
-        return f"'{op.type}' (R{op.radius_mm:g} mm)"
+        return f"'{op.type}' (R{op.radius_mm:g} mm, edges='{op.edges}')"
     if isinstance(op, ChamferOperation):
         return f"'{op.type}' ({op.distance_mm:g} mm x {op.angle_deg:g}°)"
     if isinstance(op, ShellOperation):

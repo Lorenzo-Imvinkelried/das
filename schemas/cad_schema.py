@@ -251,11 +251,30 @@ class LinearPatternOperation(BaseModel):
     spacing_y_mm: float = Field(default=10.0, gt=0.0, description="Separación entre instancias en Y (mm)")
 
 
+class MirrorOperation(BaseModel):
+    """Operación 3D de simetría (espejo) de la última operación 3D respecto a un plano base."""
+
+    type: Literal["mirror"] = "mirror"
+    plane: PlaneType = Field(
+        default="Front",
+        description="Plano de simetría ('Front' invierte eje Z/Y-croquis-Top, 'Right' invierte eje X, 'Top' invierte eje Y)",
+    )
+
+
 class FilletOperation(BaseModel):
-    """Operación 3D de redondeo constante sobre las aristas de la última operación 3D."""
+    """Operación 3D de redondeo constante sobre las aristas indicadas."""
 
     type: Literal["fillet"] = "fillet"
     radius_mm: float = Field(..., gt=0.0, description="Radio del redondeo en milímetros (mm)")
+    edges: Literal["last_feature", "vertical", "horizontal_slot_ends", "all"] = Field(
+        default="last_feature",
+        description=(
+            "Filtro de aristas a redondear: 'last_feature' (aristas de la última operación), "
+            "'vertical' (aristas rectas verticales paralelas a Y, ideal para empalmes de cuello R8 en vista Top), "
+            "'horizontal_slot_ends' (aristas horizontales en los extremos de vaciados centrales para formar extremos redondos), "
+            "o 'all' (todas las aristas del sólido)."
+        ),
+    )
 
 
 class ChamferOperation(BaseModel):
@@ -286,6 +305,7 @@ OperationType = Annotated[
         RevolveCutOperation,
         CircularPatternOperation,
         LinearPatternOperation,
+        MirrorOperation,
         FilletOperation,
         ChamferOperation,
         ShellOperation,

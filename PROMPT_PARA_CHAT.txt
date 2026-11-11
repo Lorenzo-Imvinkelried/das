@@ -13,9 +13,10 @@ Tu tarea es analizar la imagen adjunta de un croquis o plano 2D/3D (y cualquier 
   * REGLA CRÍTICA DE CONTORNOS SOLAPADOS: En SolidWorks un croquis no puede tener líneas internas que se crucen. Si una pieza está formada por varias figuras que se superponen o intersectan entre sí (por ejemplo: un cilindro central + un brazo rectangular + orejas circulares en los bordes), NO las metas todas juntas en el mismo "shapes" de un solo "extrude_boss"; crea una operación "extrude_boss" separada para cada volumen y SolidWorks las fusionará automáticamente en un único sólido 3D. En un mismo croquis solo pon múltiples figuras si NO se tocan ni se cruzan entre sí (ej. 4 agujeros separados o 2 círculos concéntricos).
   * Piezas cilíndricas, ejes, poleas, bujes o carcasas redondas: Puedes crear el cuerpo base extruyendo círculos concéntricos en "Top" o mediante "revolve_boss" en "Front" girando medio perfil 360° alrededor de "axis_line".
   * Cortes radiales o ventanas repetidas alrededor de un cilindro: NO intentes cortar desde un solo plano todas las ventanas a la vez. Haz UN SOLO corte ("extrude_cut") y aplica inmediatamente después "circular_pattern" indicando la cantidad de instancias ("instances": 6) y el eje del cilindro ("axis": "Y" si el cilindro se extruyó desde "Top", o "axis": "Z" si se extruyó desde "Front").
-  * CUIDADO CON LA SIMETRÍA EN "circular_pattern" (Vistas en Sección como SECTION A-A): Si una pieza tiene orejas en ciertos ángulos (ej. a +60°, -60° y una mordaza a 180°) y ventanas caladas en la pared del cilindro ENTRE las orejas (ej. a 0°, 120° y 240°), NO pongas el corte de la ventana encima de los ángulos de las orejas porque al rotarlo 3 veces a 360° rebanarás la mordaza de 180°. Separa siempre:
-    1) Para convertir orejas exteriores en horquillas dobles (vaciado central de altura parcial sin romper la pared del cilindro): extruye primero las orejas ("extrude_boss"), haz el corte central ("extrude_cut" con "both_directions": true) sobre la zona de las orejas, y DESPUÉS extruye el cilindro principal ("extrude_boss") para que restituya la pared cilíndrica sólida.
-    2) Para las ventanas en la pared del cilindro entre orejas: dibuja el corte en el ángulo libre entre orejas (preferiblemente como un trapecio cerrado de 4 segmentos "line" desde un radio menor al agujero interior hasta un radio apenas mayor al cilindro exterior, evitando depender de arcos con decimales redondeados) y luego aplica "circular_pattern".
+  * CUIDADO CON LA SIMETRÍA EN VISTAS DE SECCIÓN (SECTION A-A):
+    1) Antes de usar "circular_pattern" de 360°, verifica en la vista de sección si el corte se repite en los 360° o si solo es SIMÉTRICO arriba/abajo (ej. dos vaciados a ±15°..±120° que dejan una pared sólida de 120° del lado de la mordaza izquierda). Si es simétrico respecto al eje horizontal, NO uses "circular_pattern" de 3 instancias (porque la 3ra instancia cortará la mordaza); haz el corte de un lado y aplica inmediatamente {"type": "mirror", "plane": "Front"}.
+    2) Empalmes de cuello entre salientes (ej. R8 entre brazos/orejas y un cilindro en vista Top): aplica {"type": "fillet", "radius_mm": 8.0, "edges": "vertical"} justo después de extruir el cilindro y los brazos (antes de hacer cortes o ranuras).
+    3) Extremos redondos ("redondeles") en ranuras o vaciados laterales de altura H (ej. vaciado central de 10 mm de altura cuyos extremos se ven semicirculares en la vista frontal/3D): aplica al final {"type": "fillet", "radius_mm": 5.0, "edges": "horizontal_slot_ends"} (con radio = H / 2).
   * Si haces un corte desde un plano central y quieres que atraviese ambos lados del sólido simétricamente, usa "both_directions": true.
 
 ====================================================================
@@ -89,20 +90,33 @@ No inventes campos ni tipos de operaciones fuera de esta lista exacta:
        "spacing_y_mm": 20.0
      }
 
-  F) Redondeo de aristas ("fillet") -> Redondea las aristas de la última operación 3D:
+  F) Simetría / Espejo 3D ("mirror") -> Refleja la ÚLTIMA operación 3D respecto a un plano base:
+     {
+       "type": "mirror",
+       "plane": "Front"
+     }
+     * Si el croquis anterior se hizo en "Top", "plane": "Front" invierte Y (arriba/abajo) y "plane": "Right" invierte X (izquierda/derecha).
+
+  G) Redondeo de aristas ("fillet") -> Redondea aristas según el filtro "edges":
      {
        "type": "fillet",
-       "radius_mm": 2.0
+       "radius_mm": 2.0,
+       "edges": "last_feature"
      }
+     * Valores válidos para "edges":
+       - "last_feature" (por defecto): aristas de la última operación 3D.
+       - "vertical": aristas rectas verticales paralelas al eje Y (ideal para empalmes de cuello como R8 entre orejas y cilindro en vista Top).
+       - "horizontal_slot_ends": aristas horizontales en los extremos de vaciados centrales (convierte los topes rectos de un vaciado de altura H en extremos semicirculares redondos usando radius_mm = H/2).
+       - "all": todas las aristas del sólido.
 
-  G) Chaflán de aristas ("chamfer") -> Achaflana las aristas de la última operación 3D:
+  H) Chaflán de aristas ("chamfer") -> Achaflana las aristas de la última operación 3D:
      {
        "type": "chamfer",
        "distance_mm": 1.5,
        "angle_deg": 45.0
      }
 
-  H) Vaciado de carcasa ("shell") -> Ahueca la pieza eliminando la cara exterior indicada:
+  I) Vaciado de carcasa ("shell") -> Ahueca la pieza eliminando la cara exterior indicada:
      {
        "type": "shell",
        "thickness_mm": 2.0,

@@ -11,65 +11,6 @@
       "sketch": {
         "shapes": [
           {
-            "kind": "slot",
-            "x1": 0.0,
-            "y1": 0.0,
-            "x2": 18.75,
-            "y2": 32.48,
-            "width": 16.0
-          }
-        ]
-      }
-    },
-    {
-      "type": "extrude_boss",
-      "plane": "Top",
-      "plane_offset_mm": 0.0,
-      "depth_mm": 20.0,
-      "midplane": true,
-      "both_directions": false,
-      "sketch": {
-        "shapes": [
-          {
-            "kind": "slot",
-            "x1": 0.0,
-            "y1": 0.0,
-            "x2": 18.75,
-            "y2": -32.48,
-            "width": 16.0
-          }
-        ]
-      }
-    },
-    {
-      "type": "extrude_cut",
-      "plane": "Top",
-      "plane_offset_mm": 0.0,
-      "through_all": false,
-      "both_directions": true,
-      "depth_mm": 10.0,
-      "sketch": {
-        "shapes": [
-          {
-            "kind": "corner_rectangle",
-            "x1": 0.0,
-            "y1": -50.0,
-            "x2": 50.0,
-            "y2": 50.0
-          }
-        ]
-      }
-    },
-    {
-      "type": "extrude_boss",
-      "plane": "Top",
-      "plane_offset_mm": 0.0,
-      "depth_mm": 20.0,
-      "midplane": true,
-      "both_directions": false,
-      "sketch": {
-        "shapes": [
-          {
             "kind": "circle",
             "cx": 0.0,
             "cy": 0.0,
@@ -114,6 +55,51 @@
           }
         ]
       }
+    },
+    {
+      "type": "extrude_boss",
+      "plane": "Top",
+      "plane_offset_mm": 0.0,
+      "depth_mm": 20.0,
+      "midplane": true,
+      "both_directions": false,
+      "sketch": {
+        "shapes": [
+          {
+            "kind": "slot",
+            "x1": 0.0,
+            "y1": 0.0,
+            "x2": 18.75,
+            "y2": 32.48,
+            "width": 16.0
+          }
+        ]
+      }
+    },
+    {
+      "type": "extrude_boss",
+      "plane": "Top",
+      "plane_offset_mm": 0.0,
+      "depth_mm": 20.0,
+      "midplane": true,
+      "both_directions": false,
+      "sketch": {
+        "shapes": [
+          {
+            "kind": "slot",
+            "x1": 0.0,
+            "y1": 0.0,
+            "x2": 18.75,
+            "y2": -32.48,
+            "width": 16.0
+          }
+        ]
+      }
+    },
+    {
+      "type": "fillet",
+      "radius_mm": 8.0,
+      "edges": "vertical"
     },
     {
       "type": "extrude_cut",
@@ -193,41 +179,57 @@
         "shapes": [
           {
             "kind": "line",
-            "x1": 18.48,
-            "y1": 7.65,
-            "x2": 31.41,
-            "y2": 13.01
+            "x1": 21.25,
+            "y1": 5.69,
+            "x2": 53.13,
+            "y2": 14.24
           },
           {
             "kind": "line",
-            "x1": 31.41,
-            "y1": 13.01,
-            "x2": 31.41,
-            "y2": -13.01
+            "x1": 53.13,
+            "y1": 14.24,
+            "x2": 21.05,
+            "y2": 50.81
           },
           {
             "kind": "line",
-            "x1": 31.41,
-            "y1": -13.01,
-            "x2": 18.48,
-            "y2": -7.65
+            "x1": 21.05,
+            "y1": 50.81,
+            "x2": -27.50,
+            "y2": 47.63
           },
           {
             "kind": "line",
-            "x1": 18.48,
-            "y1": -7.65,
-            "x2": 18.48,
-            "y2": 7.65
+            "x1": -27.50,
+            "y1": 47.63,
+            "x2": -11.00,
+            "y2": 19.05
+          },
+          {
+            "kind": "line",
+            "x1": -11.00,
+            "y1": 19.05,
+            "x2": 8.42,
+            "y2": 20.33
+          },
+          {
+            "kind": "line",
+            "x1": 8.42,
+            "y1": 20.33,
+            "x2": 21.25,
+            "y2": 5.69
           }
         ]
       }
     },
     {
-      "type": "circular_pattern",
-      "instances": 3,
-      "angle_deg": 360.0,
-      "axis": "Y",
-      "equal_spacing": true
+      "type": "mirror",
+      "plane": "Front"
+    },
+    {
+      "type": "fillet",
+      "radius_mm": 5.0,
+      "edges": "horizontal_slot_ends"
     }
   ]
 }
