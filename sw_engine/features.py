@@ -56,13 +56,14 @@ def _call_feature_extrusion2(
     end_cond_2: int,
     depth_1_m: float,
     depth_2_m: float = 0.0,
+    reverse_dir: bool = False,
 ) -> Any:
     """Invoca FeatureExtrusion2 con los 23 parámetros exactos de SolidWorks 2018."""
     return feat_mgr.FeatureExtrusion2(
-        bool(sd),          # 1. Sd: True = una condición final (incluye MidPlane), False = dos direcciones independientes
-        False,             # 2. Flip: invertir lado a cortar
-        False,             # 3. Dir: invertir dirección de extrusión
-        int(end_cond_1),   # 4. T1: condición final dirección 1
+        bool(sd),           # 1. Sd: True = una condición final (incluye MidPlane), False = dos direcciones independientes
+        False,              # 2. Flip: invertir lado a cortar
+        bool(reverse_dir),  # 3. Dir: invertir dirección de extrusión
+        int(end_cond_1),    # 4. T1: condición final dirección 1
         int(end_cond_2),   # 5. T2: condición final dirección 2
         float(depth_1_m),  # 6. D1: profundidad dirección 1 (metros)
         float(depth_2_m),  # 7. D2: profundidad dirección 2 (metros)
@@ -118,11 +119,25 @@ def _extrude_single_sketch_boss(
         )
 
     if feat is None and sketch_name:
+        # Si un saliente secundario sobre el mismo plano base (ej. relieve de 6 mm sobre placa de 12 mm)
+        # queda sumergido dentro del sólido existente en dirección +Normal, extruir en -Normal (reverse_dir=True)
         select_by_id(model, sketch_name, "SKETCH", 0.0, 0.0, 0.0, append=False, mark=0)
         feat = _call_feature_extrusion2(
             feat_mgr=feat_mgr,
             sd=True,
             end_cond_1=SW_END_COND_BLIND,
+            end_cond_2=SW_END_COND_BLIND,
+            depth_1_m=depth_m,
+            depth_2_m=0.0,
+            reverse_dir=True,
+        )
+
+    if feat is None and sketch_name:
+        select_by_id(model, sketch_name, "SKETCH", 0.0, 0.0, 0.0, append=False, mark=0)
+        feat = _call_feature_extrusion2(
+            feat_mgr=feat_mgr,
+            sd=True,
+            end_cond_1=SW_END_COND_MID_PLANE,
             end_cond_2=SW_END_COND_BLIND,
             depth_1_m=depth_m,
             depth_2_m=0.0,

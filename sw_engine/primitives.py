@@ -1,3 +1,4 @@
+import math
 from typing import Any, Optional
 from schemas.cad_schema import (
     Arc,
@@ -75,8 +76,27 @@ def draw_shape(sketch_mgr: Any, shape: ShapeType) -> Any:
         )
 
     if isinstance(shape, Arc):
-        cx_m = mm_to_m(shape.cx)
-        cy_m = mm_to_m(shape.cy)
+        # Proyectar ortogonalmente el centro (cx, cy) sobre la mediatriz de P1(x1,y1)-P2(x2,y2).
+        # Cuando una IA redondea decimales en un arco, dist(C, P1) != dist(C, P2) por décimas de mm,
+        # lo que hace que CreateArc desplace el punto final real y deje el contorno abierto.
+        # Al proyectar C sobre la mediatriz de la cuerda P1-P2, dist(C_exact, P1) == dist(C_exact, P2)
+        # con precisión de punto flotante (1e-16), garantizando cierre exacto en ambos extremos.
+        mx = 0.5 * (shape.x1 + shape.x2)
+        my = 0.5 * (shape.y1 + shape.y2)
+        dx = shape.x2 - shape.x1
+        dy = shape.y2 - shape.y1
+        chord_len = math.hypot(dx, dy)
+        if chord_len > 1e-6:
+            nx = -dy / chord_len
+            ny = dx / chord_len
+            proj = (shape.cx - mx) * nx + (shape.cy - my) * ny
+            cx_exact = mx + proj * nx
+            cy_exact = my + proj * ny
+        else:
+            cx_exact, cy_exact = shape.cx, shape.cy
+
+        cx_m = mm_to_m(cx_exact)
+        cy_m = mm_to_m(cy_exact)
         x1_m = mm_to_m(shape.x1)
         y1_m = mm_to_m(shape.y1)
         x2_m = mm_to_m(shape.x2)

@@ -1,167 +1,266 @@
 {
-  "part_name": "Abrazadera_Brida_Partida_Exacta",
+  "part_name": "Mascara_IronMan_Placa_Frontal",
   "operations": [
-    {
-      "type": "extrude_boss",
-      "plane": "Top",
-      "plane_offset_mm": 0.0,
-      "depth_mm": 20.0,
-      "midplane": true,
-      "both_directions": false,
-      "sketch": {
-        "shapes": [
-          {
-            "kind": "circle",
-            "cx": 0.0,
-            "cy": 0.0,
-            "diameter": 60.0
-          }
-        ]
-      }
-    },
-    {
-      "type": "extrude_boss",
-      "plane": "Top",
-      "plane_offset_mm": 0.0,
-      "depth_mm": 20.0,
-      "midplane": true,
-      "both_directions": false,
-      "sketch": {
-        "shapes": [
-          {
-            "kind": "slot",
-            "x1": 0.0,
-            "y1": 0.0,
-            "x2": 18.75,
-            "y2": 32.48,
-            "width": 16.0
-          }
-        ]
-      }
-    },
-    {
-      "type": "extrude_boss",
-      "plane": "Top",
-      "plane_offset_mm": 0.0,
-      "depth_mm": 20.0,
-      "midplane": true,
-      "both_directions": false,
-      "sketch": {
-        "shapes": [
-          {
-            "kind": "slot",
-            "x1": 0.0,
-            "y1": 0.0,
-            "x2": 18.75,
-            "y2": -32.48,
-            "width": 16.0
-          }
-        ]
-      }
-    },
-    {
-      "type": "extrude_boss",
-      "plane": "Top",
-      "plane_offset_mm": 0.0,
-      "depth_mm": 20.0,
-      "midplane": true,
-      "both_directions": false,
-      "sketch": {
-        "shapes": [
-          {
-            "kind": "corner_rectangle",
-            "x1": -40.0,
-            "y1": -6.0,
-            "x2": 0.0,
-            "y2": 6.0
-          }
-        ]
-      }
-    },
     {
       "type": "extrude_boss",
       "plane": "Front",
       "plane_offset_mm": 0.0,
       "depth_mm": 12.0,
-      "midplane": true,
+      "midplane": false,
       "both_directions": false,
       "sketch": {
         "shapes": [
           {
-            "kind": "circle",
-            "cx": -40.0,
-            "cy": 0.0,
-            "diameter": 20.0
-          }
-        ]
-      }
-    },
-    {
-      "type": "extrude_cut",
-      "plane": "Top",
-      "plane_offset_mm": 0.0,
-      "through_all": false,
-      "both_directions": true,
-      "depth_mm": 10.0,
-      "sketch": {
-        "shapes": [
+            "kind": "line",
+            "x1": -60.0,
+            "y1": 0.0,
+            "x2": 60.0,
+            "y2": 0.0
+          },
           {
             "kind": "line",
-            "x1": 0.0,
+            "x1": 60.0,
             "y1": 0.0,
-            "x2": 48.3,
-            "y2": 12.94
+            "x2": 161.5,
+            "y2": 145.0
+          },
+          {
+            "kind": "line",
+            "x1": 161.5,
+            "y1": 145.0,
+            "x2": 189.1,
+            "y2": 256.0
+          },
+          {
+            "kind": "line",
+            "x1": 189.1,
+            "y1": 256.0,
+            "x2": 200.0,
+            "y2": 345.0
+          },
+          {
+            "kind": "line",
+            "x1": 200.0,
+            "y1": 345.0,
+            "x2": 200.0,
+            "y2": 450.0
           },
           {
             "kind": "arc",
             "cx": 0.0,
-            "cy": 0.0,
-            "x1": 48.3,
-            "y1": 12.94,
-            "x2": -12.94,
-            "y2": 48.3,
+            "cy": 450.0,
+            "x1": 200.0,
+            "y1": 450.0,
+            "x2": -200.0,
+            "y2": 450.0,
             "direction": 1
           },
           {
             "kind": "line",
-            "x1": -12.94,
-            "y1": 48.3,
-            "x2": 0.0,
+            "x1": -200.0,
+            "y1": 450.0,
+            "x2": -200.0,
+            "y2": 345.0
+          },
+          {
+            "kind": "line",
+            "x1": -200.0,
+            "y1": 345.0,
+            "x2": -189.1,
+            "y2": 256.0
+          },
+          {
+            "kind": "line",
+            "x1": -189.1,
+            "y1": 256.0,
+            "x2": -161.5,
+            "y2": 145.0
+          },
+          {
+            "kind": "line",
+            "x1": -161.5,
+            "y1": 145.0,
+            "x2": -60.0,
             "y2": 0.0
           }
         ]
       }
     },
     {
-      "type": "mirror",
-      "plane": "Front"
-    },
-    {
-      "type": "extrude_cut",
-      "plane": "Top",
+      "type": "extrude_boss",
+      "plane": "Front",
       "plane_offset_mm": 0.0,
-      "through_all": true,
-      "both_directions": true,
-      "depth_mm": null,
+      "depth_mm": 6.0,
+      "midplane": false,
+      "both_directions": false,
       "sketch": {
         "shapes": [
           {
-            "kind": "circle",
+            "kind": "line",
+            "x1": -60.0,
+            "y1": 0.0,
+            "x2": 60.0,
+            "y2": 0.0
+          },
+          {
+            "kind": "line",
+            "x1": 60.0,
+            "y1": 0.0,
+            "x2": 130.0,
+            "y2": 100.0
+          },
+          {
+            "kind": "arc",
+            "cx": 260.0,
+            "cy": 135.5,
+            "x1": 130.0,
+            "y1": 100.0,
+            "x2": 189.1,
+            "y2": 250.5,
+            "direction": -1
+          },
+          {
+            "kind": "line",
+            "x1": 189.1,
+            "y1": 250.5,
+            "x2": 195.0,
+            "y2": 283.5
+          },
+          {
+            "kind": "line",
+            "x1": 195.0,
+            "y1": 283.5,
+            "x2": 170.0,
+            "y2": 345.0
+          },
+          {
+            "kind": "line",
+            "x1": 170.0,
+            "y1": 345.0,
+            "x2": 170.0,
+            "y2": 480.0
+          },
+          {
+            "kind": "arc",
+            "cx": 72.0,
+            "cy": 480.0,
+            "x1": 170.0,
+            "y1": 480.0,
+            "x2": 52.0,
+            "y2": 576.0,
+            "direction": 1
+          },
+          {
+            "kind": "line",
+            "x1": 52.0,
+            "y1": 576.0,
+            "x2": 35.25,
+            "y2": 410.0
+          },
+          {
+            "kind": "line",
+            "x1": 35.25,
+            "y1": 410.0,
+            "x2": -35.25,
+            "y2": 410.0
+          },
+          {
+            "kind": "line",
+            "x1": -35.25,
+            "y1": 410.0,
+            "x2": -52.0,
+            "y2": 576.0
+          },
+          {
+            "kind": "arc",
+            "cx": -72.0,
+            "cy": 480.0,
+            "x1": -52.0,
+            "y1": 576.0,
+            "x2": -170.0,
+            "y2": 480.0,
+            "direction": 1
+          },
+          {
+            "kind": "line",
+            "x1": -170.0,
+            "y1": 480.0,
+            "x2": -170.0,
+            "y2": 345.0
+          },
+          {
+            "kind": "line",
+            "x1": -170.0,
+            "y1": 345.0,
+            "x2": -195.0,
+            "y2": 283.5
+          },
+          {
+            "kind": "line",
+            "x1": -195.0,
+            "y1": 283.5,
+            "x2": -189.1,
+            "y2": 250.5
+          },
+          {
+            "kind": "arc",
+            "cx": -260.0,
+            "cy": 135.5,
+            "x1": -189.1,
+            "y1": 250.5,
+            "x2": -130.0,
+            "y2": 100.0,
+            "direction": -1
+          },
+          {
+            "kind": "line",
+            "x1": -130.0,
+            "y1": 100.0,
+            "x2": -60.0,
+            "y2": 0.0
+          }
+        ]
+      }
+    },
+    {
+      "type": "extrude_cut",
+      "plane": "Front",
+      "plane_offset_mm": 0.0,
+      "through_all": false,
+      "both_directions": true,
+      "depth_mm": 6.0,
+      "sketch": {
+        "shapes": [
+          {
+            "kind": "line",
+            "x1": -35.25,
+            "y1": 410.0,
+            "x2": 35.25,
+            "y2": 410.0
+          },
+          {
+            "kind": "line",
+            "x1": 35.25,
+            "y1": 410.0,
+            "x2": 49.0,
+            "y2": 539.0
+          },
+          {
+            "kind": "arc",
             "cx": 0.0,
-            "cy": 0.0,
-            "diameter": 50.0
+            "cy": 345.0,
+            "x1": 49.0,
+            "y1": 539.0,
+            "x2": -49.0,
+            "y2": 539.0,
+            "direction": 1
           },
           {
-            "kind": "circle",
-            "cx": 18.75,
-            "cy": 32.48,
-            "diameter": 10.0
-          },
-          {
-            "kind": "circle",
-            "cx": 18.75,
-            "cy": -32.48,
-            "diameter": 10.0
+            "kind": "line",
+            "x1": -49.0,
+            "y1": 539.0,
+            "x2": -35.25,
+            "y2": 410.0
           }
         ]
       }
@@ -176,17 +275,18 @@
       "sketch": {
         "shapes": [
           {
-            "kind": "circle",
-            "cx": -40.0,
-            "cy": 0.0,
-            "diameter": 8.0
+            "kind": "center_rectangle",
+            "cx": 0.0,
+            "cy": 266.0,
+            "width": 76.0,
+            "height": 12.0
           }
         ]
       }
     },
     {
       "type": "extrude_cut",
-      "plane": "Top",
+      "plane": "Front",
       "plane_offset_mm": 0.0,
       "through_all": true,
       "both_directions": true,
@@ -194,11 +294,111 @@
       "sketch": {
         "shapes": [
           {
-            "kind": "corner_rectangle",
-            "x1": -55.0,
-            "y1": -1.0,
-            "x2": 0.0,
-            "y2": 1.0
+            "kind": "line",
+            "x1": 45.0,
+            "y1": 260.0,
+            "x2": 119.0,
+            "y2": 260.0
+          },
+          {
+            "kind": "line",
+            "x1": 119.0,
+            "y1": 260.0,
+            "x2": 160.0,
+            "y2": 288.0
+          },
+          {
+            "kind": "line",
+            "x1": 160.0,
+            "y1": 288.0,
+            "x2": 155.0,
+            "y2": 314.0
+          },
+          {
+            "kind": "line",
+            "x1": 155.0,
+            "y1": 314.0,
+            "x2": 48.0,
+            "y2": 283.5
+          },
+          {
+            "kind": "line",
+            "x1": 48.0,
+            "y1": 283.5,
+            "x2": 45.0,
+            "y2": 260.0
+          }
+        ]
+      }
+    },
+    {
+      "type": "mirror",
+      "plane": "Right"
+    },
+    {
+      "type": "extrude_cut",
+      "plane": "Front",
+      "plane_offset_mm": 0.0,
+      "through_all": true,
+      "both_directions": true,
+      "depth_mm": null,
+      "sketch": {
+        "shapes": [
+          {
+            "kind": "line",
+            "x1": -68.0,
+            "y1": 74.0,
+            "x2": 68.0,
+            "y2": 74.0
+          },
+          {
+            "kind": "line",
+            "x1": 68.0,
+            "y1": 74.0,
+            "x2": 78.0,
+            "y2": 64.0
+          },
+          {
+            "kind": "line",
+            "x1": 78.0,
+            "y1": 64.0,
+            "x2": 87.0,
+            "y2": 73.0
+          },
+          {
+            "kind": "line",
+            "x1": 87.0,
+            "y1": 73.0,
+            "x2": 73.0,
+            "y2": 87.0
+          },
+          {
+            "kind": "line",
+            "x1": 73.0,
+            "y1": 87.0,
+            "x2": -73.0,
+            "y2": 87.0
+          },
+          {
+            "kind": "line",
+            "x1": -73.0,
+            "y1": 87.0,
+            "x2": -87.0,
+            "y2": 73.0
+          },
+          {
+            "kind": "line",
+            "x1": -87.0,
+            "y1": 73.0,
+            "x2": -78.0,
+            "y2": 64.0
+          },
+          {
+            "kind": "line",
+            "x1": -78.0,
+            "y1": 64.0,
+            "x2": -68.0,
+            "y2": 74.0
           }
         ]
       }

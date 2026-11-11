@@ -144,5 +144,17 @@ Este documento registra cada problema real encontrado durante la construcción y
   1. Se desactivó el uso automático de `fillet` y `chamfer` 3D en `PROMPT_PARA_CHAT.txt`, `ai/system_prompt.md` y `pieza.json` (dejando las aristas vivas para redondeo manual del usuario).
   2. En `sw_engine/features.py`, `_mirror_sketch` ahora invierte el orden de segmentos e intercambia `(x1, y1) <-> (x2, y2)` conservando `direction = 1`, y `_optimize_operation_order` ejecuta automáticamente los cortes pasantes (`through_all=True`) antes que los cortes parciales dentro de cada bloque de cortes, logrando la construcción completa de `Abrazadera_Brida_Partida_Exacta` (10 operaciones).
 
+---
+
+## Incidente #12: `Falló FeatureExtrusion2 para el croquis 'Sketch2' en el plano 'Front'` en contornos multi-arco (`Mascara_IronMan_Placa_Frontal`)
+* **Síntoma:** La Operación 1 (`Sketch1`, 10 figuras) se extruyó con éxito (`Boss-Extrude1`), pero la Operación 2 (`Sketch2`, 16 figuras con 4 arcos) falló en `FeatureExtrusion2`.
+* **Causa Raíz Doble:**
+  1. **Desajuste de radios ($R_1 \neq R_2$) por redondeo decimal de la IA en primitivas `arc`:** En los 4 arcos de `Sketch2`, las coordenadas redondeadas por la IA tenían una diferencia entre $\text{dist}(C, P_1)$ y $\text{dist}(C, P_2)$ de `0.339 mm` (`134.76 mm` vs `135.10 mm`) y `0.061 mm` (`98.00 mm` vs `98.06 mm`). En SolidWorks, `SketchManager.CreateArc` fija el radio exclusivamente con $\text{dist}(C, P_1)$ y proyecta $P_2$ a ese radio, desplazando el extremo real del arco y dejando **4 brechas abiertas (contorno abierto)** con las líneas contiguas.
+  2. **Saliente secundario sumergido en el mismo plano (`plane_offset_mm: 0.0`):** `Op 1` extruyó una placa base de `12.0 mm` en `+Normal` (`Z = 0..+12 mm`) y `Op 2` intentó extruir un relieve interior más pequeño de `6.0 mm` sobre el mismo plano `Front` (`Z = 0..+6 mm`). Con `Merge = True`, un saliente 100% sumergido dentro de un sólido existente no aporta volumen nuevo y `FeatureExtrusion2` devuelve `None`.
+* **Solución Aplicada:**
+  1. En [`draw_shape`](file:///d:/Usuario/Desktop/sketch2solid/sw_engine/primitives.py#L78-L108) (`sw_engine/primitives.py`), antes de llamar a `CreateArc`, el motor proyecta ortogonalmente el centro `(cx, cy)` sobre la **mediatriz (bisectriz perpendicular)** de la cuerda $P_1 P_2$. Por geometría euclidiana, cualquier punto sobre la mediatriz cumple $\text{dist}(C_{\text{exact}}, P_1) \equiv \text{dist}(C_{\text{exact}}, P_2)$ con precisión `float64` ($10^{-16}$), eliminando para siempre los contornos abiertos por redondeo decimal en arcos generados por IA.
+  2. En [`_extrude_single_sketch_boss`](file:///d:/Usuario/Desktop/sketch2solid/sw_engine/features.py#L121-L135) (`sw_engine/features.py`), si la extrusión en `+Normal` (`reverse_dir=False`) devuelve `None` porque el saliente queda sumergido en el sólido base, el motor reintenta automáticamente en dirección `-Normal` (`reverse_dir=True`, hacia el frente del plano base).
+
+
 
 
