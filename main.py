@@ -4,12 +4,15 @@ import importlib
 import json
 from pathlib import Path
 import re
+import sys
 import tkinter as tk
 from tkinter import messagebox, scrolledtext
 import traceback
 from typing import Any
 
+import schemas
 import schemas.cad_schema
+import sw_engine
 import sw_engine.connection
 import sw_engine.primitives
 import sw_engine.features
@@ -57,9 +60,11 @@ class _GuiLogStream:
 def reload_engine_modules() -> None:
     """Recarga en caliente los módulos del esquema y motor COM desde disco."""
     importlib.reload(schemas.cad_schema)
+    importlib.reload(schemas)
     importlib.reload(sw_engine.connection)
     importlib.reload(sw_engine.primitives)
     importlib.reload(sw_engine.features)
+    importlib.reload(sw_engine)
 
 
 def clean_json_text(raw_text: str) -> str:
@@ -349,13 +354,13 @@ class Sketch2SolidApp:
 
     def build_in_solidworks(self) -> None:
         raw_text = self.json_editor.get("1.0", tk.END)
-        try:
-            LAST_LOG_PATH.write_text("", encoding="utf-8")
-        except Exception:
-            pass
         old_stdout = sys.stdout
-        sys.stdout = _GuiLogStream(self, old_stdout)  # type: ignore[assignment]
         try:
+            try:
+                LAST_LOG_PATH.write_text("", encoding="utf-8")
+            except Exception:
+                pass
+            sys.stdout = _GuiLogStream(self, old_stdout)  # type: ignore[assignment]
             self.log("Validando JSON con Pydantic...")
             part = parse_and_validate_part(raw_text)
             formatted = json.dumps(part.model_dump(), indent=2, ensure_ascii=False)
