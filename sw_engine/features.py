@@ -285,33 +285,21 @@ def _cut_single_sketch(
     feat_mgr = model.FeatureManager
     feat = None
 
-    # 1A. Si through_all=True, probar primero SW_END_COND_THROUGH_ALL_BOTH (9) y luego Sd=False.
-    #     Esto garantiza que si la pieza se extruyó con midplane=True, un corte pasante en el plano
-    #     central atraviese AMBAS mitades del sólido y no solo una mitad.
+    # 1A. Si through_all=True, usar primero Sd=False (ambas direcciones) con SW_END_COND_THROUGH_ALL.
+    #     En SolidWorks 2018, pasar Sd=True ignora la segunda dirección y corta solo la mitad del
+    #     sólido cuando el croquis reside en el plano central (midplane=True).
     if op.through_all:
         feat = _call_feature_cut3(
             feat_mgr=feat_mgr,
-            sd=True,
+            sd=False,
             reverse_dir=False,
-            end_cond_1=SW_END_COND_THROUGH_ALL_BOTH,
-            end_cond_2=SW_END_COND_BLIND,
+            end_cond_1=SW_END_COND_THROUGH_ALL,
+            end_cond_2=SW_END_COND_THROUGH_ALL,
             depth_1_m=depth_m,
+            depth_2_m=depth_m,
         )
         if feat is None and sketch_name:
             select_by_id(model, sketch_name, "SKETCH", 0.0, 0.0, 0.0, append=False, mark=0)
-
-        if feat is None:
-            feat = _call_feature_cut3(
-                feat_mgr=feat_mgr,
-                sd=False,
-                reverse_dir=False,
-                end_cond_1=SW_END_COND_THROUGH_ALL,
-                end_cond_2=SW_END_COND_THROUGH_ALL,
-                depth_1_m=depth_m,
-                depth_2_m=depth_m,
-            )
-            if feat is None and sketch_name:
-                select_by_id(model, sketch_name, "SKETCH", 0.0, 0.0, 0.0, append=False, mark=0)
 
     # 1B. Si through_all=False y both_directions=True, el usuario/IA indicó una profundidad total
     #     centrada en el plano (igual que midplane=True). Usamos SW_END_COND_MID_PLANE (6) o

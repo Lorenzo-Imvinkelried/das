@@ -115,3 +115,16 @@ Este documento registra cada problema real encontrado durante la construcción y
   2. En `execute_circular_pattern`, además de probar `FeatureCircularPattern4` con `GeometryPattern=False/True` y ángulo total/paso angular, se implementó un **Fallback Geométrico de Rotación 2D** (`_rotate_sketch`): si SolidWorks rechaza la matriz 3D por cambio topológico, el motor rota automáticamente las coordenadas 2D del croquis anterior por $k \times \Delta\theta$ y ejecuta los cortes directamente con el kernel booleano.
   3. En `main.py`, se redirigió `sys.stdout` en tiempo real hacia el cuadro de texto de la GUI y hacia el archivo `ultimo_log.txt` para contar con trazabilidad completa en cada ejecución.
 
+---
+
+## Incidente #10: Cortes pasantes (`through_all: true`) a mitad de altura en piezas `midplane: true` y vaciado en sección (`SECTION A-A`)
+* **Síntoma:** Al construir `Abrazadera_Brida_Partida` (`pieza.json`), el agujero central de `Ø50`, los dos de `Ø10`, el de `Ø8` y la ranura de `2 mm` perforaban solo la mitad superior del sólido (`10 mm` en vez de `20 mm`), dejando un piso macizo en el plano medio (`Y = 0`). Además, el vaciado central de `10 mm` (`SECTION A-A`) rebanaba la oreja izquierda de apriete (`180°`) al rotarse con `circular_pattern`.
+* **Causa Raíz:**
+  1. En `_cut_single_sketch` (`sw_engine/features.py`), cuando `op.through_all = True`, el primer intento llamaba a `FeatureCut3` con `sd = True` (*Single Direction*) y `end_cond_1 = SW_END_COND_THROUGH_ALL_BOTH (9)`. En SolidWorks 2018, pasar `Sd = True` hace que `FeatureCut3` evalúe únicamente la Dirección 1 y corte solo una mitad desde el plano central (`Y = 0` a `+10 mm`), devolviendo un puntero `IFeature` válido e impidiendo que se ejecutara el bloque `sd = False`.
+  2. Como el centro `(0,0)` había quedado macizo en la mitad inferior (`Y = -10` a `0`), los cortes en cuña con vértice en `(0,0)` generaban geometría de espesor cero en el origen al rotarse.
+  3. En el plano original (`SECTION A-A`), las dos orejas derechas (`±60°`) llevan un vaciado central de `10 mm` por fuera del cilindro de `Ø60` (convirtiéndolas en horquillas dobles sin cortar la pared del cilindro detrás de ellas), mientras que las 3 ventanas pasantes de la pared del cilindro están ubicadas *entre* las orejas (`0°`, `120°`, `240°`).
+* **Solución Aplicada:**
+  1. Se eliminó el intento con `sd = True, end_cond_1 = SW_END_COND_THROUGH_ALL_BOTH` en `_cut_single_sketch` (`sw_engine/features.py`) para que `op.through_all = True` invoque directamente `sd = False` (ambas direcciones) con `end_cond_1 = SW_END_COND_THROUGH_ALL (1)` y `end_cond_2 = SW_END_COND_THROUGH_ALL (1)`.
+  2. Se reestructuró `pieza.json` con orden constructivo CSG (extrusión de las dos orejas derechas -> corte central de `10 mm` para formar las horquillas -> extrusión del cilindro `Ø60` que restituye el anillo central sólido -> oreja izquierda -> agujeros pasantes -> ventana trapezoidal entre orejas + `circular_pattern` de 3 instancias a `360°`) y se documentó esta regla en `PROMPT_PARA_CHAT.txt` y `ai/system_prompt.md`.
+
+

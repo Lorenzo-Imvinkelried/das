@@ -11,6 +11,65 @@
       "sketch": {
         "shapes": [
           {
+            "kind": "slot",
+            "x1": 0.0,
+            "y1": 0.0,
+            "x2": 18.75,
+            "y2": 32.48,
+            "width": 16.0
+          }
+        ]
+      }
+    },
+    {
+      "type": "extrude_boss",
+      "plane": "Top",
+      "plane_offset_mm": 0.0,
+      "depth_mm": 20.0,
+      "midplane": true,
+      "both_directions": false,
+      "sketch": {
+        "shapes": [
+          {
+            "kind": "slot",
+            "x1": 0.0,
+            "y1": 0.0,
+            "x2": 18.75,
+            "y2": -32.48,
+            "width": 16.0
+          }
+        ]
+      }
+    },
+    {
+      "type": "extrude_cut",
+      "plane": "Top",
+      "plane_offset_mm": 0.0,
+      "through_all": false,
+      "both_directions": true,
+      "depth_mm": 10.0,
+      "sketch": {
+        "shapes": [
+          {
+            "kind": "corner_rectangle",
+            "x1": 0.0,
+            "y1": -50.0,
+            "x2": 50.0,
+            "y2": 50.0
+          }
+        ]
+      }
+    },
+    {
+      "type": "extrude_boss",
+      "plane": "Top",
+      "plane_offset_mm": 0.0,
+      "depth_mm": 20.0,
+      "midplane": true,
+      "both_directions": false,
+      "sketch": {
+        "shapes": [
+          {
             "kind": "circle",
             "cx": 0.0,
             "cy": 0.0,
@@ -52,46 +111,6 @@
             "cx": -40.0,
             "cy": 0.0,
             "diameter": 20.0
-          }
-        ]
-      }
-    },
-    {
-      "type": "extrude_boss",
-      "plane": "Top",
-      "plane_offset_mm": 0.0,
-      "depth_mm": 20.0,
-      "midplane": true,
-      "both_directions": false,
-      "sketch": {
-        "shapes": [
-          {
-            "kind": "slot",
-            "x1": 0.0,
-            "y1": 0.0,
-            "x2": 18.75,
-            "y2": 32.48,
-            "width": 16.0
-          }
-        ]
-      }
-    },
-    {
-      "type": "extrude_boss",
-      "plane": "Top",
-      "plane_offset_mm": 0.0,
-      "depth_mm": 20.0,
-      "midplane": true,
-      "both_directions": false,
-      "sketch": {
-        "shapes": [
-          {
-            "kind": "slot",
-            "x1": 0.0,
-            "y1": 0.0,
-            "x2": 18.75,
-            "y2": -32.48,
-            "width": 16.0
           }
         ]
       }
@@ -174,27 +193,31 @@
         "shapes": [
           {
             "kind": "line",
-            "x1": 0.0,
-            "y1": 0.0,
-            "x2": 11.65,
-            "y2": 43.47
-          },
-          {
-            "kind": "arc",
-            "cx": 0.0,
-            "cy": 0.0,
-            "x1": 11.65,
-            "y1": 43.47,
-            "x2": 43.47,
-            "y2": 11.65,
-            "direction": -1
+            "x1": 18.48,
+            "y1": 7.65,
+            "x2": 31.41,
+            "y2": 13.01
           },
           {
             "kind": "line",
-            "x1": 43.47,
-            "y1": 11.65,
-            "x2": 0.0,
-            "y2": 0.0
+            "x1": 31.41,
+            "y1": 13.01,
+            "x2": 31.41,
+            "y2": -13.01
+          },
+          {
+            "kind": "line",
+            "x1": 31.41,
+            "y1": -13.01,
+            "x2": 18.48,
+            "y2": -7.65
+          },
+          {
+            "kind": "line",
+            "x1": 18.48,
+            "y1": -7.65,
+            "x2": 18.48,
+            "y2": 7.65
           }
         ]
       }
