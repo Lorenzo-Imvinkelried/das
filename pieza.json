@@ -1,0 +1,78 @@
+{
+  "part_name": "Cilindro_6_Ventanas_60mm",
+  "operations": [
+    {
+      "type": "extrude_boss",
+      "plane": "Top",
+      "depth_mm": 35.0,
+      "midplane": false,
+      "sketch": {
+        "shapes": [
+          {
+            "kind": "circle",
+            "cx": 0.0,
+            "cy": 0.0,
+            "diameter": 60.0
+          }
+        ]
+      }
+    },
+    {
+      "type": "extrude_cut",
+      "plane": "Top",
+      "through_all": true,
+      "depth_mm": null,
+      "sketch": {
+        "shapes": [
+          {
+            "kind": "circle",
+            "cx": 0.0,
+            "cy": 0.0,
+            "diameter": 59.0
+          }
+        ]
+      }
+    },
+    {
+      "type": "extrude_cut",
+      "plane": "Front",
+      "through_all": true,
+      "depth_mm": null,
+      "sketch": {
+        "shapes": [
+          {
+            "kind": "center_rectangle",
+            "cx": 0.0,
+            "cy": 17.5,
+            "width": 14.0,
+            "height": 22.0
+          }
+        ]
+      }
+    },
+    {
+      "type": "extrude_cut",
+      "plane": "Right",
+      "through_all": true,
+      "depth_mm": null,
+      "sketch": {
+        "shapes": [
+          {
+            "kind": "center_rectangle",
+            "cx": -12.5,
+            "cy": 17.5,
+            "width": 14.0,
+            "height": 22.0
+          },
+          {
+            "kind": "center_rectangle",
+            "cx": 12.5,
+            "cy": 17.5,
+            "width": 14.0,
+            "height": 22.0
+          }
+        ]
+      }
+    }
+  ]
+}
