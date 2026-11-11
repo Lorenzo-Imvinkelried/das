@@ -75,17 +75,61 @@ def select_by_id(
     )
 
 
-def select_reference_plane(model: Any, plane: str = "Front") -> bool:
+# Constantes de planos de referencia (swRefPlaneReferenceConstraints_e)
+SW_REF_PLANE_DISTANCE = 8       # swRefPlaneReferenceConstraint_Distance
+SW_REF_PLANE_OPTION_FLIP = 256  # swRefPlaneReferenceConstraint_OptionFlip
+
+# Mapeo de ejes principales a la intersección de dos planos base ortogonales
+AXIS_PLANES_MAP: dict[str, tuple[str, str]] = {
+    "Y": ("Front", "Right"),  # Eje vertical Y (intersección Alzado + Vista lateral)
+    "Z": ("Top", "Right"),    # Eje longitudinal Z (intersección Planta + Vista lateral)
+    "X": ("Front", "Top"),    # Eje horizontal X (intersección Alzado + Planta)
+}
+
+# Tipos de elementos del árbol del FeatureManager que NO son operaciones 3D sólidas
+NON_SOLID_FEATURE_TYPES: set[str] = {
+    "OriginProfileFeature",
+    "RefPlane",
+    "RefAxis",
+    "RefPoint",
+    "CoordSys",
+    "ProfileFeature",
+    "3DProfileFeature",
+    "HistoryFolder",
+    "SensorFolder",
+    "DetailCabinet",
+    "MaterialFolder",
+    "CommentsFolder",
+    "FavoriteFolder",
+    "SelectionSetFolder",
+    "DocsFolder",
+    "EqnFolder",
+    "SolidBodyFolder",
+    "SurfaceBodyFolder",
+    "CutListFolder",
+    "SubWeldFolder",
+    "AmbientLight",
+    "DirectionLight",
+}
+
+
+def select_reference_plane(
+    model: Any,
+    plane: str = "Front",
+    append: bool = False,
+    mark: int = 0,
+) -> bool:
     """
     Selecciona el plano base soportando SolidWorks en Español e Inglés.
     Intenta primero el nombre en español ('Alzado', 'Planta', 'Vista lateral') y
     si devuelve False intenta con el nombre en inglés ('Front Plane', 'Top Plane', 'Right Plane').
     """
     candidates = PLANE_NAMES_MAP.get(plane, [plane])
-    model.ClearSelection2(True)
+    if not append:
+        model.ClearSelection2(True)
 
     for candidate_name in candidates:
-        if select_by_id(model, candidate_name, "PLANE", 0.0, 0.0, 0.0, append=False, mark=0):
+        if select_by_id(model, candidate_name, "PLANE", 0.0, 0.0, 0.0, append=append, mark=mark):
             return True
 
     # Fallback: buscar por orden de RefPlane en el árbol del FeatureManager si la plantilla usa otros nombres
@@ -96,11 +140,113 @@ def select_reference_plane(model: Any, plane: str = "Front") -> bool:
         if com_call_0(feat, "GetTypeName2") == "RefPlane":
             if ref_plane_idx == target_idx:
                 feat_name = str(com_call_0(feat, "Name"))
-                return select_by_id(model, feat_name, "PLANE", 0.0, 0.0, 0.0, append=False, mark=0)
+                return select_by_id(model, feat_name, "PLANE", 0.0, 0.0, 0.0, append=append, mark=mark)
             ref_plane_idx += 1
         feat = com_call_0(feat, "GetNextFeature")
 
     raise RuntimeError(f"No se pudo seleccionar el plano base '{plane}' (intentados: {candidates}).")
+
+
+def select_or_create_plane(model: Any, plane: str = "Front", offset_mm: float = 0.0) -> str:
+    """
+    Selecciona el plano base indicado o, si offset_mm != 0, crea un plano de referencia
+    paralelo desfasado (InsertRefPlane) y lo deja seleccionado para abrir el croquis.
+    """
+    select_reference_plane(model, plane, append=False, mark=0)
+    if abs(offset_mm) <= 1e-6:
+        return plane
+
+    constraint = SW_REF_PLANE_DISTANCE if offset_mm > 0 else (SW_REF_PLANE_DISTANCE | SW_REF_PLANE_OPTION_FLIP)
+    distance_m = mm_to_m(abs(offset_mm))
+
+    ref_plane_feat = model.FeatureManager.InsertRefPlane(
+        int(constraint),
+        float(distance_m),
+        0,
+        0.0,
+        0,
+        0.0,
+    )
+    if ref_plane_feat is None:
+        raise RuntimeError(
+            f"No se pudo crear el plano paralelo desfasado ({offset_mm} mm) desde '{plane}'."
+        )
+
+    # Buscar el nombre del último RefPlane creado en el árbol
+    last_plane_name = ""
+    try:
+        last_plane_name = str(com_call_0(ref_plane_feat, "Name") or "")
+    except Exception:
+        last_plane_name = ""
+
+    if not last_plane_name:
+        feat = com_call_0(model, "FirstFeature")
+        while feat is not None:
+            if com_call_0(feat, "GetTypeName2") == "RefPlane":
+                last_plane_name = str(com_call_0(feat, "Name"))
+            feat = com_call_0(feat, "GetNextFeature")
+
+    if not last_plane_name:
+        raise RuntimeError("Se creó el plano de referencia pero no se pudo obtener su nombre.")
+
+    model.ClearSelection2(True)
+    select_by_id(model, last_plane_name, "PLANE", 0.0, 0.0, 0.0, append=False, mark=0)
+    return last_plane_name
+
+
+def create_reference_axis(model: Any, axis: str = "Y") -> str:
+    """
+    Crea un eje de referencia (RefAxis) en la intersección de dos planos base ortogonales
+    mediante ModelDoc2.InsertAxis2(True) y devuelve su nombre en el árbol.
+    - 'Y': intersección de 'Front' y 'Right' (eje vertical)
+    - 'Z': intersección de 'Top' y 'Right' (eje longitudinal)
+    - 'X': intersección de 'Front' y 'Top' (eje horizontal)
+    """
+    plane_1, plane_2 = AXIS_PLANES_MAP.get(axis.upper(), ("Front", "Right"))
+    select_reference_plane(model, plane_1, append=False, mark=0)
+    select_reference_plane(model, plane_2, append=True, mark=0)
+
+    ok = bool(model.InsertAxis2(True))
+    if not ok:
+        raise RuntimeError(
+            f"Falló InsertAxis2(True) al crear el eje de referencia '{axis}' "
+            f"(intersección de '{plane_1}' y '{plane_2}')."
+        )
+
+    last_axis_name = ""
+    feat = com_call_0(model, "FirstFeature")
+    while feat is not None:
+        if com_call_0(feat, "GetTypeName2") == "RefAxis":
+            last_axis_name = str(com_call_0(feat, "Name"))
+        feat = com_call_0(feat, "GetNextFeature")
+
+    if not last_axis_name:
+        raise RuntimeError(f"No se encontró el eje de referencia creado para el eje '{axis}'.")
+
+    model.ClearSelection2(True)
+    return last_axis_name
+
+
+def get_last_solid_feature_name(model: Any) -> tuple[str, str]:
+    """
+    Recorre el FeatureManager y devuelve (nombre, tipo) de la última operación 3D sólida
+    creada (ej. Extrusion, Cut, ICE, Revolve, RevCut, etc.), ignorando carpetas, planos y croquis.
+    """
+    last_name = ""
+    last_type = ""
+    feat = com_call_0(model, "FirstFeature")
+    while feat is not None:
+        feat_type = str(com_call_0(feat, "GetTypeName2") or "")
+        if feat_type and feat_type not in NON_SOLID_FEATURE_TYPES:
+            last_name = str(com_call_0(feat, "Name") or "")
+            last_type = feat_type
+        feat = com_call_0(feat, "GetNextFeature")
+
+    if not last_name:
+        raise RuntimeError(
+            "No se encontró una operación 3D previa en el árbol para aplicar la matriz."
+        )
+    return last_name, last_type
 
 
 def connect_to_solidworks() -> Any:
