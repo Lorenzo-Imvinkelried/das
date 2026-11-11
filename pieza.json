@@ -97,11 +97,6 @@
       }
     },
     {
-      "type": "fillet",
-      "radius_mm": 8.0,
-      "edges": "vertical"
-    },
-    {
       "type": "extrude_cut",
       "plane": "Top",
       "plane_offset_mm": 0.0,
