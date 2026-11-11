@@ -1,0 +1,217 @@
+================================================================================
+  SKETCH2SOLID - GUIA BASICA DE FUNCIONAMIENTO Y USO DESDE CERO (FASE 1)
+================================================================================
+
+1. QUE ES SKETCH2SOLID Y EN QUE ESTADO ESTA AHORA?
+--------------------------------------------------------------------------------
+Sketch2Solid es una herramienta en Python pensada para crear piezas 3D reales
+y editables dentro de SolidWorks 2018 de forma automatica.
+
+La arquitectura completa tiene 3 capas:
+  1) Capa de IA (Fase 2 - pendiente): Una IA lee una foto de un croquis 2D y
+     genera un archivo/texto en formato JSON con las medidas en milimetros.
+  2) Capa de Validacion (Fase 1 - lista): Verifica que ese JSON cumpla con las
+     reglas de diseno (usando Pydantic en schemas/cad_schema.py).
+  3) Motor de SolidWorks (Fase 1 - listo): Lee ese JSON y controla SolidWorks
+     2018 en vivo mediante la API COM de Windows (modulo sw_engine).
+
+IMPORTANTE SOBRE EL ESTADO ACTUAL (FASE 1):
+Todavia NO esta conectada la IA (Gemini) ni existe un programa con interfaz
+grafica o un archivo ".exe" compilado. En esta Fase 1 solo esta construido y
+listo el motor local que dibuja en SolidWorks 2018 a partir de un JSON de prueba.
+
+
+2. DONDE ESTA EL "EJECUTABLE" Y QUE HACE CADA ARCHIVO?
+--------------------------------------------------------------------------------
+Tienes tres formas de abrir y usar el programa:
+  1) Doble clic en: D:\Usuario\Desktop\sketch2solid\iniciar_sketch2solid.bat
+  2) Abrir D:\Usuario\Desktop\sketch2solid\main.py con Python IDLE y tocar F5.
+  3) Para correr la prueba fija sin ventana: abrir test_engine.py y tocar F5.
+
+Estructura completa de la carpeta D:\Usuario\Desktop\sketch2solid\:
+
+  - iniciar_sketch2solid.bat
+      Acceso directo doble-clic que abre la ventana grafica de main.py.
+
+  - main.py
+      Programa principal con ventana grafica. Te permite copiar el Prompt
+      Maestro con 1 clic, pegar el JSON que te devuelva cualquier chat de IA
+      (ChatGPT, Gemini, Claude) y construirlo en SolidWorks 2018.
+
+  - PROMPT_PARA_CHAT.txt
+      El texto exacto que debes copiar y pegar en el chat de IA junto con la
+      foto de tu croquis para que te devuelva el JSON compatible.
+
+  - pieza.json
+      Archivo donde se guarda automaticamente el ultimo JSON validado y
+      construido desde main.py.
+
+  - test_engine.py
+      Script de prueba rapida del motor. Contiene un JSON de ejemplo
+      (SAMPLE_PART_JSON) que dibuja una placa rectangular de 100 x 50 x 8 mm
+      con 4 agujeros pasantes de 6 mm en las esquinas.
+
+  - requirements.txt
+      Lista de librerias de Python necesarias para que el programa funcione
+      (pywin32, pydantic, google-genai, pillow, python-dotenv).
+
+  - .env.example
+      Plantilla para guardar la clave de API de Gemini (recien se usara en la
+      Fase 2, ahora no hace falta tocarlo).
+
+  - initial_idea.txt
+      Documento original con la idea y arquitectura del proyecto.
+
+  - GUIA_DE_USO.txt
+      Este instructivo que estas leyendo.
+
+  - schemas/
+      * cad_schema.py: Define la estructura exacta que debe tener el JSON de
+        una pieza (medidas en milimetros, planos permitidos, figuras 2D y
+        operaciones 3D validas).
+
+  - sw_engine/  (El motor que habla con SolidWorks 2018)
+      * connection.py: Se conecta a tu SolidWorks 2018 abierto, crea una pieza
+        nueva, convierte milimetros a metros, selecciona planos en espanol o
+        ingles ("Alzado"/"Front Plane", etc.) y desactiva ventanas emergentes
+        molestas mientras dibuja.
+      * primitives.py: Abre el croquis, dibuja las figuras 2D (rectangulos,
+        circulos, lineas) directo en la base de datos interna de SolidWorks
+        (AddToDB) y cierra el croquis.
+      * features.py: Ejecuta las operaciones 3D reales (saliente extruido con
+        FeatureExtrusion2 y corte extruido con FeatureCut3), reconstruye la
+        pieza y la acomoda en vista isometrica.
+
+  - ai/  (Preparado para la Fase 2)
+      * system_prompt.md: Instrucciones para la IA de ingenieria mecanica.
+      * vision_agent.py: Marcador de posicion vacio (todavia lanza un aviso de
+        que la Fase 2 no esta implementada).
+
+
+3. COMO FUNCIONA INTERNAMENTE CUANDO LO EJECUTAS?
+--------------------------------------------------------------------------------
+Cuando corres "test_engine.py", pasan estos pasos en segundos:
+
+  Paso 1: Lee el JSON de prueba (SAMPLE_PART_JSON) y lo valida con Pydantic
+          para asegurar que no falten medidas ni haya numeros invalidos.
+  Paso 2: Busca tu ventana abierta de SolidWorks 2018 en Windows.
+  Paso 3: Crea un documento de Pieza nuevo y vacio (usando NewPart o tu
+          plantilla por defecto de SolidWorks).
+  Paso 4: Apaga temporalmente la opcion de SolidWorks "Introducir valor de
+          cota al crear" para que no salga ningun cartel que trabe a Python.
+  Paso 5: Selecciona el plano "Alzado" (o "Front Plane" si esta en ingles),
+          abre el Croquis 1, dibuja un rectangulo centrado de 100 x 50 mm,
+          cierra el croquis y lo extruye 8 mm.
+  Paso 6: Vuelve a seleccionar el plano, abre el Croquis 2, dibuja 4 circulos
+          de 6 mm de diametro en las coordenadas (±40, ±15), cierra el croquis
+          y hace un corte "Por todo" (through_all).
+  Paso 7: Restaura tus preferencias de SolidWorks, reconstruye la pieza y hace
+          zoom en vista isometrica para que veas el resultado terminado.
+
+
+4. REQUISITOS PREVIOS
+--------------------------------------------------------------------------------
+Antes de empezar, necesitas tener instalado en tu PC con Windows:
+  1. SolidWorks 2018.
+  2. Python 3 instalado (con la opcion "Add Python to PATH" marcada al instalar).
+
+
+5. COMO USARLO PASO A PASO DESDE CERO
+--------------------------------------------------------------------------------
+Nota: El entorno virtual (.venv) y todas sus librerias ya fueron creados e
+instalados en D:\Usuario\Desktop\sketch2solid\.venv. Por lo tanto, si corres
+directo en esta PC, puedes ir directamente al PASO A, PASO D y PASO E.
+(Los pasos B y C solo son necesarios si alguna vez borras .venv o lo llevas
+a otra computadora).
+
+--- PASO A: Abrir la consola EN LA CARPETA DEL PROYECTO ---
+MUY IMPORTANTE: No ejecutes los comandos desde C:\Users\Usuario; asegurate de
+estar dentro de D:\Usuario\Desktop\sketch2solid.
+1. Abre el Explorador de Windows y ve a: D:\Usuario\Desktop\sketch2solid
+2. Haz clic en la barra de direcciones de arriba, escribe "powershell" (o "cmd")
+   y presiona Enter. Si abriste la consola desde otro lugar, ejecuta primero:
+     cd /d D:\Usuario\Desktop\sketch2solid   (en CMD)
+     cd D:\Usuario\Desktop\sketch2solid      (en PowerShell)
+
+--- PASO B: Crear el entorno virtual de Python (solo si no existe .venv) ---
+IMPORTANTE EN ESTA PC: Si escribes "python" a secas, Windows abre el Python de
+MSYS2 (sin pip). Usa "py" para usar Python 3.13 nativo de Windows:
+
+  py -m venv .venv
+
+Luego activa ese entorno virtual:
+  - En PowerShell: .\.venv\Scripts\Activate.ps1
+  - En CMD (Simbolo del sistema): .\.venv\Scripts\activate.bat
+
+(NOTA: Si PowerShell bloquea Activate.ps1, o prefieres no activar nada, puedes
+saltar la activacion y usar directo ".\.venv\Scripts\python.exe".)
+
+--- PASO C: Instalar las librerias necesarias (solo si no existen en .venv) ---
+Desde D:\Usuario\Desktop\sketch2solid, ejecuta:
+
+  .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+--- PASO D: Abrir SolidWorks 2018 ---
+1. Abre SolidWorks 2018 normalmente en tu PC.
+2. Asegurate de que haya terminado de cargar y que NO haya ninguna ventana
+   emergente abierta (por ejemplo, mensajes de bienvenida, licencias o cuadros
+   de dialogo esperando que hagas clic en Aceptar). No hace falta que crees
+   ninguna pieza a mano; el programa la creara sola.
+
+--- PASO E: Ejecutar el programa ---
+En la consola (dentro de D:\Usuario\Desktop\sketch2solid), ejecuta:
+
+  .\.venv\Scripts\python.exe test_engine.py
+
+Mira la ventana de SolidWorks 2018: veras aparecer la pieza 3D en vivo y en la
+consola veras el mensaje "[OK] Pieza generada exitosamente en SolidWorks 2018".
+
+
+6. COMO PROBAR OTRAS PIEZAS EN ESTA FASE 1 (SIN IA TODAVIA)
+--------------------------------------------------------------------------------
+Mientras no este la Fase 2, puedes probar tus propias piezas modificando el
+bloque SAMPLE_PART_JSON dentro del archivo test_engine.py (puedes abrirlo con el
+Bloc de notas, VS Code o cualquier editor de texto).
+
+Opciones que soporta actualmente schemas/cad_schema.py (todo en milimetros):
+  - Planos ("plane"): "Front", "Top" o "Right"
+  - Operaciones ("type"):
+      * "extrude_boss": pide "depth_mm" (y opcional "midplane": true/false)
+      * "extrude_cut": pide "through_all": true (o "through_all": false y
+        "depth_mm": valor)
+  - Figuras dentro de "sketch" -> "shapes" ("kind"):
+      * "center_rectangle": cx, cy, width, height
+      * "corner_rectangle": x1, y1, x2, y2
+      * "circle": cx, cy, diameter
+      * "line": x1, y1, x2, y2
+
+Guardas los cambios en test_engine.py y vuelves a correr:
+  .\.venv\Scripts\python.exe test_engine.py
+
+
+7. SOLUCION DE PROBLEMAS COMUNES
+--------------------------------------------------------------------------------
+- Error "No such file or directory: 'requirements.txt'":
+  Significa que ejecutaste el comando desde otra carpeta (por ejemplo
+  C:\Users\Usuario) en vez de D:\Usuario\Desktop\sketch2solid. Ejecuta primero:
+    cd /d D:\Usuario\Desktop\sketch2solid
+
+- Error "No module named 'pip'" al usar "python":
+  El comando "python" apunta a MSYS2 en esta PC. Usa siempre "py" o
+  ".\.venv\Scripts\python.exe".
+
+- Error "No module named 'pydantic'" o "No module named 'win32com'":
+  Significa que no usaste el Python del entorno virtual. Corre el script con:
+    .\.venv\Scripts\python.exe test_engine.py
+
+- Error "No se pudo conectar con 'SldWorks.Application'":
+  SolidWorks 2018 esta cerrado, no termino de abrir o se ejecuto con distintos
+  permisos (por ejemplo, SolidWorks como Administrador y la consola normal).
+  Abre SolidWorks y la consola con el mismo nivel de permisos.
+
+- Error "No se pudo crear una pieza nueva en SolidWorks 2018":
+  Revisa en SolidWorks -> Opciones -> Ubicaciones de archivos / Plantillas
+  predeterminadas que exista una plantilla de pieza (.prtdot) configurada, y
+  verifica que no haya ninguna ventana emergente bloqueando SolidWorks.
+================================================================================
+
