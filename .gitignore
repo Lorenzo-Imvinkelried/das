@@ -1,0 +1,16 @@
+# Entorno virtual y cachés de Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Variables de entorno y credenciales
+.env
+
+# Archivos temporales de SolidWorks y del sistema
+~$*
+*.swj
+*.tmp
+.DS_Store
+Thumbs.db

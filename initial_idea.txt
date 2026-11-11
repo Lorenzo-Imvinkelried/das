@@ -1,0 +1,153 @@
+Arrancar un repositorio limpio de cero con Antigravity es la mejor decisión técnica que podés tomar para este proyecto.
+
+El motivo por el que la mayoría de los intentos de "IA a SolidWorks" fallan es porque le piden al modelo de visión que escriba directamente el código de la API (`pywin32` o VBA). La API COM de SolidWorks 2018 es viejísima, tiene métodos con 15 parámetros booleanos seguidos, requiere manejar punteros nulos (`None`) y obliga a pasar todas las medidas en **metros** (si le pasás `50`, te dibuja un bloque de 50 metros). Si la IA alucina un solo argumento de la API, el script crashea.
+
+La arquitectura ganadora es **desacoplar la inteligencia visual de la ejecución en la API**: la IA mira el croquis y escupe un JSON limpio con las operaciones en milímetros; luego, tu propio motor en Python lee ese JSON y ejecuta los comandos duros y ya probados en SolidWorks.
+
+---
+
+## Documento de Diseño de Sistema (SDD): Sketch2Solid
+
+### 1. Objetivo del Sistema
+
+Convertir imágenes de croquis mecánicos 2D acotados (hechos a mano o planos técnicos) e instrucciones en lenguaje natural en piezas 3D nativas dentro de **SolidWorks 2018**, generando el árbol de operaciones (`FeatureManager`) completo, parametrizado y 100% editable, sin usar formatos mudos intermedios (`.step`/`.igs`).
+
+### 2. Arquitectura del Pipeline (3 Capas)
+
+1. **Capa de Visión y Razonamiento (LLM Multimodal):**
+* **Entrada:** Imagen del croquis (`.jpg`/`.png`) + nota de texto (ej. *"Extruir la base a 10mm y hacerle vaciado de 2mm"*).
+* **Proceso:** Extrae vistas, geometrías primitivas (rectángulos, círculos, líneas), cotas en milímetros y secuencia lógica constructiva.
+* **Salida:** Archivo o payload JSON validado bajo un esquema estricto (*Intermediate CAD Representation*).
+
+
+2. **Capa de Traducción y Abstracción (`sw_wrapper.py`):**
+* **Proceso:** Librería propia en Python que expone funciones limpias (ej. `extrude(depth_mm=10)`) y esconde las rarezas de la API de SolidWorks 2018 (conversión automática de `mm` a `metros`, limpieza de selecciones `ClearSelection2`, manejo de `SketchManager` y `FeatureManager`).
+
+
+3. **Capa de Ejecución COM (`SldWorks.Application`):**
+* **Proceso:** Conexión en caliente vía `pywin32` a la instancia abierta de SolidWorks 2018 en Windows. Construye la pieza en tiempo real frente al usuario.
+
+
+
+### 3. Estructura del Repositorio
+
+```text
+sketch2solid/
+├── .env                     # API Key de Gemini
+├── requirements.txt         # pywin32, google-genai, pydantic, pillow
+├── main.py                  # CLI o punto de entrada (recibe imagen + prompt)
+├── schemas/
+│   └── cad_schema.py        # Modelos Pydantic que obligan a la IA a responder en JSON exacto
+├── ai/
+│   ├── vision_agent.py      # Llamada a la API multimodal con Structured Outputs
+│   └── system_prompt.md     # Prompt maestro de ingeniería mecánica
+└── sw_engine/
+    ├── connection.py        # Conector COM a SolidWorks 2018 y creación de documento nuevo
+    ├── primitives.py        # Wrapper de croquis 2D (rectángulos, círculos, líneas, cotas)
+    └── features.py          # Wrapper de operaciones 3D (extrusión, corte, redondeo, vaciado)
+
+```
+
+### 4. Reglas Críticas de la API de SolidWorks 2018 (Cheat Sheet Técnico)
+
+* **Unidades:** La API interna trabaja exclusivamente en **metros** y **radianes**. Todo valor del JSON debe dividirse por `1000.0` antes de enviarse a SolidWorks.
+* **Nombres de Planos:** En SolidWorks en español se llaman `"Alzado"`, `"Planta"`, `"Vista lateral"`. En inglés `"Front Plane"`, `"Top Plane"`, `"Right Plane"`. En lugar de seleccionarlos por nombre (que rompe el script según el idioma instalado), conviene obtenerlos por índice de feature o iterar sobre los planos base.
+* **Early vs. Late Binding:** En Python con `pywin32`, métodos como `SelectByID2` fallan si les pasás un objeto `Nothing`. Hay que usar `pythoncom.Nothing` o envolver las llamadas con cuidado.
+* **Cierre de Croquis:** Siempre hay que llamar a `SketchManager.InsertSketch(True)` para abrir y volver a llamarlo con `True` para cerrar antes de pedirle a `FeatureManager` que extruya.
+
+---
+
+## Prompts para el Sistema
+
+Acá tenés los dos prompts clave: el **System Prompt** que va adentro de tu código para que la IA entienda planos mecánicos, y el **Prompt de Arranque** para pegarle a Antigravity hoy mismo.
+
+### 1. System Prompt para el Agente de Visión (`ai/system_prompt.md`)
+
+*Este es el prompt que tu programa en Python le envía a la API junto con la foto del croquis:*
+
+```markdown
+Eres un Ingeniero Mecánico Senior experto en diseño paramétrico en SolidWorks.
+Tu tarea es analizar la imagen de un croquis o plano 2D (y cualquier instrucción adicional del usuario) y descomponer la pieza en una secuencia lógica, cronológica y exacta de operaciones constructivas para construirla en 3D.
+
+REGLAS DE INTERPRETACIÓN GEOMÉTRICA:
+1. Origen (0,0): Asume siempre el centro de la figura principal o la esquina inferior izquierda como el origen (0,0) del croquis para simplificar la parametrización.
+2. Unidades: Extrae todas las medidas en MILÍMETROS (mm). Si una cota dice "R10", es un radio de 10mm (diámetro 20mm). Si dice "Ø15", es un diámetro de 15mm.
+3. Estrategia Constructiva (Sustractiva): 
+   - Paso 1: Crea siempre el volumen principal primero (Operación `extrude_boss` sobre el plano base).
+   - Paso 2: Agrega protuberancias secundarias.
+   - Paso 3: Realiza todos los agujeros y rebajes como operaciones de corte (`extrude_cut`).
+   - Paso 4: Aplica redondeos (`fillet`) o vaciados (`shell`) al final.
+4. Si falta el espesor de extrusión en el dibujo y el usuario no lo especificó en el texto, asume un espesor estándar de 5.0 mm.
+
+Debes responder ÚNICAMENTE con un objeto JSON válido que respete el esquema de operaciones provisto. No incluyas explicaciones ni bloques markdown fuera del JSON.
+
+```
+
+---
+
+### 2. Esquema JSON de Referencia (Cómo se comunican la IA y tu Python)
+
+Para que veas qué tan limpio queda el puente, cuando le pases la foto de una placa de 100x50mm con 4 agujeros en las esquinas, el LLM te va a devolver esto:
+
+```json
+{
+  "part_name": "Soporte_Sensor_IoT",
+  "operations": [
+    {
+      "type": "extrude_boss",
+      "plane": "Front",
+      "depth_mm": 6.0,
+      "sketch": {
+        "shapes": [
+          {"kind": "center_rectangle", "cx": 0, "cy": 0, "width": 100.0, "height": 50.0}
+        ]
+      }
+    },
+    {
+      "type": "extrude_cut",
+      "plane": "Front",
+      "through_all": true,
+      "sketch": {
+        "shapes": [
+          {"kind": "circle", "cx": -40.0, "cy": 15.0, "diameter": 5.0},
+          {"kind": "circle", "cx": 40.0, "cy": 15.0, "diameter": 5.0},
+          {"kind": "circle", "cx": -40.0, "cy": -15.0, "diameter": 5.0},
+          {"kind": "circle", "cx": 40.0, "cy": -15.0, "diameter": 5.0}
+        ]
+      }
+    }
+  ]
+}
+
+```
+
+---
+
+### 3. Prompt de Inicialización para Antigravity (Copiá y pegá esto en tu IDE)
+
+Abrí una carpeta vacía en tu entorno, inicializá el agente y tirale este prompt para que te arme el esqueleto funcional y puedas probar la conexión con tu SolidWorks 2018 en 5 minutos:
+
+```text
+Hola. Vamos a construir "Sketch2Solid", una herramienta en Python que toma fotos de croquis 2D acotados, los procesa con un LLM multimodal (Gemini API con Structured Outputs) para generar un JSON de operaciones CAD, y luego ejecuta esas operaciones en tiempo real dentro de SolidWorks 2018 usando la API COM (`pywin32`) para obtener piezas nativas con su árbol de operaciones editable.
+
+Para empezar con una base sólida, no implementes todavía la llamada a la IA. Primero quiero construir y probar el motor de conexión con SolidWorks 2018 (`sw_engine`).
+
+Por favor, genera la estructura inicial del proyecto y escribe un script de prueba funcional (`test_sw_connection.py` + módulo `sw_engine`) que haga lo siguiente:
+1. Se conecte a una instancia abierta de SolidWorks 2018 mediante `win32com.client.Dispatch("SldWorks.Application")`.
+2. Cree una pieza nueva usando la plantilla por defecto (o `NewPart()`).
+3. Implemente un wrapper que reciba un diccionario/JSON de prueba como este:
+   - Un rectángulo centrado en (0,0) de 80mm x 40mm extruido a 10mm.
+   - Un corte circular centrado en (0,0) de 16mm de diámetro que atraviese toda la pieza.
+4. Ten muy en cuenta las particularidades de la API COM de SolidWorks 2018 en Python:
+   - Todas las medidas en la API deben convertirse de milímetros a metros (dividir por 1000.0).
+   - Para evitar problemas de idioma (español vs inglés al seleccionar "Alzado" o "Front Plane"), selecciona el primer plano base iterando las features del documento o selecciona por nombre contemplando ambos idiomas ("Alzado" / "Front Plane").
+   - Usa `pythoncom.Nothing` cuando un método COM como `SelectByID2` requiera pasar un objeto vacío.
+   - Asegúrate de abrir y cerrar correctamente los croquis con `SketchManager.InsertSketch(True)` y desactivar el modo de "agregar cota al introducir valor" (`SetUserPreferenceToggle(swInputDimValOnCreate, False)`) si es necesario para que no salten cuadros de diálogo bloqueantes, aunque también quiero que agregues las cotas reales con `AddDimension2` si es viable, o al menos que el croquis quede limpio.
+
+Crea los archivos necesarios e indícame cómo correr el test con SolidWorks 2018 abierto.
+
+```
+
+### Un tip de oro para tu primera prueba hoy:
+
+Cuando corras ese primer script con SolidWorks 2018 abierto, hay una preferencia en SolidWorks que a veces frena a los scripts: la opción **"Introducir valor de cota"**. Si el script intenta poner una cota, SolidWorks abre una ventanita esperando que vos tipees el número y congela a Python. En el prompt de Antigravity ya le incluí la instrucción (`swInputDimValOnCreate = False`) para que el script apague esa ventanita antes de dibujar y la vuelva a prender al terminar. Con eso, el dibujo se hace en milisegundos sin trabarse.
