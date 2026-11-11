@@ -1,5 +1,5 @@
 {
-  "part_name": "Soporte_Abrazadera_Brida",
+  "part_name": "Abrazadera_Brida_Partida",
   "operations": [
     {
       "type": "extrude_boss",
@@ -15,31 +15,83 @@
             "cx": 0.0,
             "cy": 0.0,
             "diameter": 60.0
-          },
+          }
+        ]
+      }
+    },
+    {
+      "type": "extrude_boss",
+      "plane": "Top",
+      "plane_offset_mm": 0.0,
+      "depth_mm": 20.0,
+      "midplane": true,
+      "both_directions": false,
+      "sketch": {
+        "shapes": [
           {
             "kind": "corner_rectangle",
             "x1": -40.0,
             "y1": -6.0,
             "x2": 0.0,
             "y2": 6.0
-          },
+          }
+        ]
+      }
+    },
+    {
+      "type": "extrude_boss",
+      "plane": "Front",
+      "plane_offset_mm": 0.0,
+      "depth_mm": 12.0,
+      "midplane": true,
+      "both_directions": false,
+      "sketch": {
+        "shapes": [
           {
             "kind": "circle",
             "cx": -40.0,
             "cy": 0.0,
             "diameter": 20.0
-          },
+          }
+        ]
+      }
+    },
+    {
+      "type": "extrude_boss",
+      "plane": "Top",
+      "plane_offset_mm": 0.0,
+      "depth_mm": 20.0,
+      "midplane": true,
+      "both_directions": false,
+      "sketch": {
+        "shapes": [
           {
-            "kind": "circle",
-            "cx": 32.48,
-            "cy": 18.75,
-            "diameter": 16.0
-          },
+            "kind": "slot",
+            "x1": 0.0,
+            "y1": 0.0,
+            "x2": 18.75,
+            "y2": 32.48,
+            "width": 16.0
+          }
+        ]
+      }
+    },
+    {
+      "type": "extrude_boss",
+      "plane": "Top",
+      "plane_offset_mm": 0.0,
+      "depth_mm": 20.0,
+      "midplane": true,
+      "both_directions": false,
+      "sketch": {
+        "shapes": [
           {
-            "kind": "circle",
-            "cx": 0.0,
-            "cy": -37.5,
-            "diameter": 16.0
+            "kind": "slot",
+            "x1": 0.0,
+            "y1": 0.0,
+            "x2": 18.75,
+            "y2": -32.48,
+            "width": 16.0
           }
         ]
       }
@@ -49,7 +101,7 @@
       "plane": "Top",
       "plane_offset_mm": 0.0,
       "through_all": true,
-      "both_directions": false,
+      "both_directions": true,
       "depth_mm": null,
       "sketch": {
         "shapes": [
@@ -61,16 +113,28 @@
           },
           {
             "kind": "circle",
-            "cx": 32.48,
-            "cy": 18.75,
+            "cx": 18.75,
+            "cy": 32.48,
             "diameter": 10.0
           },
           {
             "kind": "circle",
-            "cx": 0.0,
-            "cy": -37.5,
+            "cx": 18.75,
+            "cy": -32.48,
             "diameter": 10.0
-          },
+          }
+        ]
+      }
+    },
+    {
+      "type": "extrude_cut",
+      "plane": "Front",
+      "plane_offset_mm": 0.0,
+      "through_all": true,
+      "both_directions": true,
+      "depth_mm": null,
+      "sketch": {
+        "shapes": [
           {
             "kind": "circle",
             "cx": -40.0,
@@ -82,29 +146,10 @@
     },
     {
       "type": "extrude_cut",
-      "plane": "Front",
-      "plane_offset_mm": 0.0,
-      "through_all": false,
-      "both_directions": false,
-      "depth_mm": 10.0,
-      "sketch": {
-        "shapes": [
-          {
-            "kind": "center_rectangle",
-            "cx": -15.0,
-            "cy": 0.0,
-            "width": 65.0,
-            "height": 10.0
-          }
-        ]
-      }
-    },
-    {
-      "type": "extrude_cut",
       "plane": "Top",
       "plane_offset_mm": 0.0,
       "through_all": true,
-      "both_directions": false,
+      "both_directions": true,
       "depth_mm": null,
       "sketch": {
         "shapes": [
@@ -117,6 +162,49 @@
           }
         ]
       }
+    },
+    {
+      "type": "extrude_cut",
+      "plane": "Top",
+      "plane_offset_mm": 0.0,
+      "through_all": false,
+      "both_directions": true,
+      "depth_mm": 10.0,
+      "sketch": {
+        "shapes": [
+          {
+            "kind": "line",
+            "x1": 0.0,
+            "y1": 0.0,
+            "x2": 11.65,
+            "y2": 43.47
+          },
+          {
+            "kind": "arc",
+            "cx": 0.0,
+            "cy": 0.0,
+            "x1": 11.65,
+            "y1": 43.47,
+            "x2": 43.47,
+            "y2": 11.65,
+            "direction": -1
+          },
+          {
+            "kind": "line",
+            "x1": 43.47,
+            "y1": 11.65,
+            "x2": 0.0,
+            "y2": 0.0
+          }
+        ]
+      }
+    },
+    {
+      "type": "circular_pattern",
+      "instances": 3,
+      "angle_deg": 360.0,
+      "axis": "Y",
+      "equal_spacing": true
     }
   ]
 }

@@ -19,6 +19,39 @@ from sw_engine import build_part, com_call_0
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_JSON_PATH = BASE_DIR / "pieza.json"
 PROMPT_FILE_PATH = BASE_DIR / "PROMPT_PARA_CHAT.txt"
+LAST_LOG_PATH = BASE_DIR / "ultimo_log.txt"
+
+
+class _GuiLogStream:
+    """Redirige print() en tiempo real hacia el cuadro de registro de la GUI y ultimo_log.txt."""
+
+    def __init__(self, app: "Sketch2SolidApp", fallback_stream: Any) -> None:
+        self.app = app
+        self.fallback_stream = fallback_stream
+        self._buffer = ""
+
+    def write(self, data: str) -> int:
+        if self.fallback_stream is not None:
+            try:
+                self.fallback_stream.write(data)
+            except Exception:
+                pass
+        self._buffer += data
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
+            if line.strip():
+                self.app.log(line)
+        return len(data)
+
+    def flush(self) -> None:
+        if self._buffer.strip():
+            self.app.log(self._buffer.rstrip("\n"))
+            self._buffer = ""
+        if self.fallback_stream is not None:
+            try:
+                self.fallback_stream.flush()
+            except Exception:
+                pass
 
 
 def reload_engine_modules() -> None:
@@ -213,7 +246,7 @@ class Sketch2SolidApp:
             log_frame,
             wrap=tk.WORD,
             font=("Consolas", 9),
-            height=6,
+            height=10,
             bg="#f8f9fa",
             state=tk.DISABLED,
         )
@@ -224,6 +257,11 @@ class Sketch2SolidApp:
         self.log_text.insert(tk.END, message + "\n")
         self.log_text.see(tk.END)
         self.log_text.configure(state=tk.DISABLED)
+        try:
+            with LAST_LOG_PATH.open("a", encoding="utf-8") as fh:
+                fh.write(message + "\n")
+        except Exception:
+            pass
         self.root.update_idletasks()
 
     def copy_master_prompt(self) -> None:
@@ -312,6 +350,12 @@ class Sketch2SolidApp:
     def build_in_solidworks(self) -> None:
         raw_text = self.json_editor.get("1.0", tk.END)
         try:
+            LAST_LOG_PATH.write_text("", encoding="utf-8")
+        except Exception:
+            pass
+        old_stdout = sys.stdout
+        sys.stdout = _GuiLogStream(self, old_stdout)  # type: ignore[assignment]
+        try:
             self.log("Validando JSON con Pydantic...")
             part = parse_and_validate_part(raw_text)
             formatted = json.dumps(part.model_dump(), indent=2, ensure_ascii=False)
@@ -341,6 +385,12 @@ class Sketch2SolidApp:
                 "Error al construir en SolidWorks",
                 f"Ocurrió un error durante la construcción:\n\n{exc}",
             )
+        finally:
+            try:
+                sys.stdout.flush()
+            except Exception:
+                pass
+            sys.stdout = old_stdout
 
 
 def main() -> None:

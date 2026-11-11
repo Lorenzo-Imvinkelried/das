@@ -1,20 +1,26 @@
 import math
-from typing import Any, Union
+from typing import Any, Optional, Union
 from schemas.cad_schema import (
     Arc,
     CADPart,
+    CenterRectangle,
     ChamferOperation,
+    Circle,
     CircularPatternOperation,
+    CornerRectangle,
     ExtrudeBossOperation,
     ExtrudeCutOperation,
     FilletOperation,
     Line,
     LinearPatternOperation,
     OperationType,
+    Polygon,
     RevolveBossOperation,
     RevolveCutOperation,
+    ShapeType,
     ShellOperation,
     Sketch,
+    Slot,
 )
 from .connection import (
     com_call_0,
@@ -279,9 +285,9 @@ def _cut_single_sketch(
     feat_mgr = model.FeatureManager
     feat = None
 
-    # 1. Si both_directions=True o through_all=True, probar primero hacia ambos lados.
-    #    Esto garantiza que si la pieza se extruyó con midplane=True, un corte pasante en el plano
-    #    central atraviese AMBAS mitades del sólido y no solo una mitad.
+    # 1A. Si through_all=True, probar primero SW_END_COND_THROUGH_ALL_BOTH (9) y luego Sd=False.
+    #     Esto garantiza que si la pieza se extruyó con midplane=True, un corte pasante en el plano
+    #     central atraviese AMBAS mitades del sólido y no solo una mitad.
     if op.through_all:
         feat = _call_feature_cut3(
             feat_mgr=feat_mgr,
@@ -294,18 +300,44 @@ def _cut_single_sketch(
         if feat is None and sketch_name:
             select_by_id(model, sketch_name, "SKETCH", 0.0, 0.0, 0.0, append=False, mark=0)
 
-    if feat is None and (op.both_directions or op.through_all):
+        if feat is None:
+            feat = _call_feature_cut3(
+                feat_mgr=feat_mgr,
+                sd=False,
+                reverse_dir=False,
+                end_cond_1=SW_END_COND_THROUGH_ALL,
+                end_cond_2=SW_END_COND_THROUGH_ALL,
+                depth_1_m=depth_m,
+                depth_2_m=depth_m,
+            )
+            if feat is None and sketch_name:
+                select_by_id(model, sketch_name, "SKETCH", 0.0, 0.0, 0.0, append=False, mark=0)
+
+    # 1B. Si through_all=False y both_directions=True, el usuario/IA indicó una profundidad total
+    #     centrada en el plano (igual que midplane=True). Usamos SW_END_COND_MID_PLANE (6) o
+    #     depth_m / 2.0 hacia cada lado para no duplicar la profundidad y partir la pieza en dos.
+    if feat is None and not op.through_all and op.both_directions:
         feat = _call_feature_cut3(
             feat_mgr=feat_mgr,
-            sd=False,
+            sd=True,
             reverse_dir=False,
-            end_cond_1=end_cond_1,
-            end_cond_2=end_cond_1,
+            end_cond_1=SW_END_COND_MID_PLANE,
+            end_cond_2=SW_END_COND_BLIND,
             depth_1_m=depth_m,
-            depth_2_m=depth_m,
         )
         if feat is None and sketch_name:
             select_by_id(model, sketch_name, "SKETCH", 0.0, 0.0, 0.0, append=False, mark=0)
+            feat = _call_feature_cut3(
+                feat_mgr=feat_mgr,
+                sd=False,
+                reverse_dir=False,
+                end_cond_1=SW_END_COND_BLIND,
+                end_cond_2=SW_END_COND_BLIND,
+                depth_1_m=depth_m / 2.0,
+                depth_2_m=depth_m / 2.0,
+            )
+            if feat is None and sketch_name:
+                select_by_id(model, sketch_name, "SKETCH", 0.0, 0.0, 0.0, append=False, mark=0)
 
     # 2. Intentar en dirección +Normal (Dir=True)
     if feat is None:
@@ -446,37 +478,175 @@ def execute_revolve(
     return feat
 
 
-def execute_circular_pattern(model: Any, op: CircularPatternOperation) -> Any:
+def _rotate_point(x: float, y: float, angle_rad: float) -> tuple[float, float]:
+    """Rota un punto 2D (x, y) alrededor del origen (0, 0) por angle_rad radianes."""
+    cos_a = math.cos(angle_rad)
+    sin_a = math.sin(angle_rad)
+    return (
+        round(x * cos_a - y * sin_a, 4),
+        round(x * sin_a + y * cos_a, 4),
+    )
+
+
+def _rotate_sketch(sketch: Sketch, angle_deg: float) -> Sketch:
+    """Devuelve una copia del Sketch con todas sus figuras rotadas angle_deg grados alrededor de (0,0)."""
+    rad = math.radians(float(angle_deg))
+    rotated_shapes: list[ShapeType] = []
+
+    for s in sketch.shapes:
+        if isinstance(s, Circle):
+            nx, ny = _rotate_point(s.cx, s.cy, rad)
+            rotated_shapes.append(Circle(cx=nx, cy=ny, diameter=s.diameter))
+        elif isinstance(s, Polygon):
+            nx, ny = _rotate_point(s.cx, s.cy, rad)
+            rotated_shapes.append(
+                Polygon(cx=nx, cy=ny, diameter=s.diameter, sides=s.sides, inscribed=s.inscribed)
+            )
+        elif isinstance(s, Line):
+            x1, y1 = _rotate_point(s.x1, s.y1, rad)
+            x2, y2 = _rotate_point(s.x2, s.y2, rad)
+            rotated_shapes.append(Line(x1=x1, y1=y1, x2=x2, y2=y2))
+        elif isinstance(s, Arc):
+            cx, cy = _rotate_point(s.cx, s.cy, rad)
+            x1, y1 = _rotate_point(s.x1, s.y1, rad)
+            x2, y2 = _rotate_point(s.x2, s.y2, rad)
+            rotated_shapes.append(Arc(cx=cx, cy=cy, x1=x1, y1=y1, x2=x2, y2=y2, direction=s.direction))
+        elif isinstance(s, Slot):
+            x1, y1 = _rotate_point(s.x1, s.y1, rad)
+            x2, y2 = _rotate_point(s.x2, s.y2, rad)
+            rotated_shapes.append(Slot(x1=x1, y1=y1, x2=x2, y2=y2, width=s.width))
+        elif isinstance(s, CenterRectangle):
+            hw = s.width / 2.0
+            hh = s.height / 2.0
+            corners = [
+                _rotate_point(s.cx - hw, s.cy - hh, rad),
+                _rotate_point(s.cx + hw, s.cy - hh, rad),
+                _rotate_point(s.cx + hw, s.cy + hh, rad),
+                _rotate_point(s.cx - hw, s.cy + hh, rad),
+            ]
+            for i in range(4):
+                p1 = corners[i]
+                p2 = corners[(i + 1) % 4]
+                rotated_shapes.append(Line(x1=p1[0], y1=p1[1], x2=p2[0], y2=p2[1]))
+        elif isinstance(s, CornerRectangle):
+            corners = [
+                _rotate_point(s.x1, s.y1, rad),
+                _rotate_point(s.x2, s.y1, rad),
+                _rotate_point(s.x2, s.y2, rad),
+                _rotate_point(s.x1, s.y2, rad),
+            ]
+            for i in range(4):
+                p1 = corners[i]
+                p2 = corners[(i + 1) % 4]
+                rotated_shapes.append(Line(x1=p1[0], y1=p1[1], x2=p2[0], y2=p2[1]))
+
+    return Sketch(shapes=rotated_shapes)
+
+
+def _find_feature_by_name(model: Any, target_name: str) -> Any:
+    """Busca y devuelve el puntero IFeature en el árbol del FeatureManager por su nombre."""
+    feat = com_call_0(model, "FirstFeature")
+    while feat is not None:
+        if str(com_call_0(feat, "Name") or "") == target_name:
+            return feat
+        feat = com_call_0(feat, "GetNextFeature")
+    return None
+
+
+def execute_circular_pattern(
+    model: Any,
+    op: CircularPatternOperation,
+    prev_op: Optional[OperationType] = None,
+) -> Any:
     """
     Ejecuta una matriz circular (FeatureCircularPattern4) sobre la última operación 3D creada:
     1. Identifica la última operación 3D sólida en el árbol del FeatureManager.
     2. Crea un eje de referencia (InsertAxis2) en la intersección de dos planos base según op.axis.
     3. Selecciona la operación con Mark=4 ('BODYFEATURE') y el eje con Mark=1 ('AXIS').
-    4. Ejecuta FeatureCircularPattern4 con los 7 parámetros de SolidWorks 2018.
+    4. Ejecuta FeatureCircularPattern4 (con GeometryPattern=False y fallback a True).
+    5. Si SolidWorks rechaza la matriz de operación (ej. cuando una instancia cruza una ranura
+       previa que altera la topología de caras), aplica automáticamente rotación geométrica 2D
+       sobre el croquis de prev_op para construir las instancias restantes sin fallar.
     """
-    target_feat_name, _ = get_last_solid_feature_name(model)
+    target_feat_name, target_feat_type = get_last_solid_feature_name(model)
     axis_name = create_reference_axis(model, op.axis)
+    print(
+        f"     -> Matriz circular sobre '{target_feat_name}' (tipo '{target_feat_type}') "
+        f"alrededor de '{axis_name}' (eje '{op.axis}', {op.instances} instancias)..."
+    )
 
-    angle_rad = math.radians(float(op.angle_deg))
+    # En FeatureCircularPattern4 de SolidWorks 2018:
+    # - Si EqualSpacing=True, Spacing es el ángulo TOTAL en radianes (ej. 2*pi).
+    # - Si EqualSpacing=False, Spacing es el paso angular entre instancias (total / instances).
+    total_rad = math.radians(float(op.angle_deg))
+    step_rad = total_rad / float(op.instances)
     feat_mgr = model.FeatureManager
+    target_feat_obj = _find_feature_by_name(model, target_feat_name)
 
-    def _try_circular_pattern(geom_pattern: bool) -> Any:
+    def _try_circular_pattern(geom_pattern: bool, equal_spacing: bool, spacing_rad: float) -> Any:
         model.ClearSelection2(True)
-        select_by_id(model, target_feat_name, "BODYFEATURE", 0.0, 0.0, 0.0, append=False, mark=4)
-        select_by_id(model, axis_name, "AXIS", 0.0, 0.0, 0.0, append=True, mark=1)
+        ok_feat = select_by_id(model, target_feat_name, "BODYFEATURE", 0.0, 0.0, 0.0, append=False, mark=4)
+        if not ok_feat and target_feat_obj is not None:
+            ok_feat = select_entity(model, target_feat_obj, append=False, mark=4)
+        ok_axis = select_by_id(model, axis_name, "AXIS", 0.0, 0.0, 0.0, append=True, mark=1)
+        print(
+            f"     -> Intento FeatureCircularPattern4(geom={geom_pattern}, equal={equal_spacing}): "
+            f"sel_feat={ok_feat}, sel_axis={ok_axis}"
+        )
         return feat_mgr.FeatureCircularPattern4(
             int(op.instances),       # 1. Number
-            float(angle_rad),        # 2. Spacing (radianes)
+            float(spacing_rad),      # 2. Spacing (radianes)
             False,                   # 3. FlipDirection
             "NULL",                  # 4. DName
             bool(geom_pattern),      # 5. GeometryPattern
-            bool(op.equal_spacing),  # 6. EqualSpacing
+            bool(equal_spacing),     # 6. EqualSpacing
             False,                   # 7. VaryInstance
         )
 
-    feat = _try_circular_pattern(geom_pattern=False)
+    feat = _try_circular_pattern(geom_pattern=False, equal_spacing=op.equal_spacing, spacing_rad=total_rad)
     if feat is None:
-        feat = _try_circular_pattern(geom_pattern=True)
+        feat = _try_circular_pattern(geom_pattern=True, equal_spacing=op.equal_spacing, spacing_rad=total_rad)
+    if feat is None:
+        feat = _try_circular_pattern(geom_pattern=False, equal_spacing=False, spacing_rad=step_rad)
+    if feat is None:
+        feat = _try_circular_pattern(geom_pattern=True, equal_spacing=False, spacing_rad=step_rad)
+
+    # Fallback infalible: si SolidWorks rechaza la matriz 3D por cambio topológico (ej. el corte
+    # rotado cruza una ranura o unión de caras distinta), rotar las coordenadas del croquis anterior
+    if feat is None and isinstance(prev_op, (ExtrudeCutOperation, ExtrudeBossOperation)):
+        step_deg = float(op.angle_deg) / float(op.instances) if op.equal_spacing else float(op.angle_deg)
+        # Cuando el croquis está en el plano perpendicular al eje de rotación (ej. Top con eje Y,
+        # Front con eje Z, Right con eje X), rotamos el croquis 2D directamente:
+        perp_plane_map = {"Y": "Top", "Z": "Front", "X": "Right"}
+        if prev_op.plane == perp_plane_map.get(op.axis.upper(), "Top"):
+            print(
+                f"     -> [FALLBACK GEOMÉTRICO] SolidWorks rechazó el patrón de operación sobre '{target_feat_name}' "
+                f"(posible cruce de topología/ranura). Ejecutando las {op.instances - 1} instancias rotadas por croquis..."
+            )
+            for k in range(1, int(op.instances)):
+                rot_angle = k * step_deg
+                # En el plano Top de SolidWorks, el giro alrededor de +Y invierte el signo en el plano 2D
+                rot_sketch = _rotate_sketch(prev_op.sketch, rot_angle)
+                if isinstance(prev_op, ExtrudeCutOperation):
+                    rot_op: Union[ExtrudeCutOperation, ExtrudeBossOperation] = ExtrudeCutOperation(
+                        plane=prev_op.plane,
+                        plane_offset_mm=prev_op.plane_offset_mm,
+                        through_all=prev_op.through_all,
+                        both_directions=prev_op.both_directions,
+                        depth_mm=prev_op.depth_mm,
+                        sketch=rot_sketch,
+                    )
+                    feat = execute_extrude_cut(model, rot_op)
+                else:
+                    rot_op = ExtrudeBossOperation(
+                        plane=prev_op.plane,
+                        plane_offset_mm=prev_op.plane_offset_mm,
+                        depth_mm=prev_op.depth_mm,
+                        midplane=prev_op.midplane,
+                        both_directions=prev_op.both_directions,
+                        sketch=rot_sketch,
+                    )
+                    feat = execute_extrude_boss(model, rot_op)
 
     if feat is None:
         raise RuntimeError(
@@ -693,7 +863,11 @@ def execute_shell(model: Any, op: ShellOperation) -> Any:
     return after_name
 
 
-def execute_operation(model: Any, op: OperationType) -> Any:
+def execute_operation(
+    model: Any,
+    op: OperationType,
+    prev_op: Optional[OperationType] = None,
+) -> Any:
     """Despacha una operación validada por Pydantic hacia su ejecutor de SolidWorks."""
     if isinstance(op, ExtrudeBossOperation):
         return execute_extrude_boss(model, op)
@@ -704,7 +878,7 @@ def execute_operation(model: Any, op: OperationType) -> Any:
     if isinstance(op, RevolveCutOperation):
         return execute_revolve(model, op, is_cut=True)
     if isinstance(op, CircularPatternOperation):
-        return execute_circular_pattern(model, op)
+        return execute_circular_pattern(model, op, prev_op=prev_op)
     if isinstance(op, LinearPatternOperation):
         return execute_linear_pattern(model, op)
     if isinstance(op, FilletOperation):
@@ -737,17 +911,21 @@ def build_part(part: CADPart) -> Any:
     Orquesta la construcción completa de una pieza CADPart en SolidWorks 2018:
     - Conecta a SolidWorks 2018 y abre una pieza limpia.
     - Desactiva temporalmente swInputDimValOnCreate (enum 10) y swSketchInference (enum 249).
-    - Ejecuta secuencialmente cada croquis y operación 3D.
+    - Ejecuta secuencialmente cada croquis y operación 3D imprimiendo telemetría detallada.
     - Restaura las preferencias del usuario y ajusta la vista isométrica.
     """
     sw_app = connect_to_solidworks()
     model = create_new_part(sw_app)
 
     prev_dim_toggle = set_input_dim_on_create(sw_app, False)
+    prev_op: Optional[OperationType] = None
     try:
         for idx, operation in enumerate(part.operations, start=1):
             print(f"  [{idx}/{len(part.operations)}] Ejecutando {_format_operation_summary(operation)}...")
-            execute_operation(model, operation)
+            execute_operation(model, operation, prev_op=prev_op)
+            last_name, last_type = get_last_solid_feature_name(model)
+            print(f"     [OK] Operación {idx} completada -> última feature en árbol: '{last_name}' ({last_type})")
+            prev_op = operation
     finally:
         # Restaurar las preferencias de cota e inferencia para que la UI quede 100% normal al editar
         set_input_dim_on_create(sw_app, True if prev_dim_toggle else True)
