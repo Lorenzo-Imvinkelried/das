@@ -131,4 +131,18 @@ Este documento registra cada problema real encontrado durante la construcción y
        - `"vertical"` detecta las aristas rectas verticales paralelas a `Y` para aplicar empalmes de cuello (`R8` entre orejas y cilindro) antes de los cortes.
        - `"horizontal_slot_ends"` detecta las caras verticales interiores de fin de vaciado (`-max_y < y_min < y_max < +max_y`) y redondea sus aristas horizontales superior e inferior (con fallback automático `0.96 * R` para evitar el error de cara nula de Parasolid cuando $2R = H$), creando los extremos semicirculares redondos ("redondeles" `R5`) en las aperturas laterales.
 
+---
+
+## Incidente #11: Propagación excesiva de `FeatureFillet` 3D y error `Sketch7` en `mirror` (`Abrazadera_Brida_Partida_Exacta`)
+* **Síntoma:**
+  1. Al activar `FeatureFillet` sobre aristas interiores con propagación tangente (`Propagate = True`), SolidWorks propagaba el redondeo a lo largo de la corona superior y deformaba la pieza.
+  2. Tras quitar los `fillet` automáticos y regenerar la pieza desde visión con `mirror`, la operación 7 (`mirror` sobre `Front`, croquis `Sketch7`) falló en `FeatureCut3`.
+* **Causa Raíz:**
+  1. En SolidWorks, los redondeos 3D selectivos (`Fillet` / `Chamfer`) dependen de aristas puntuales difíciles de predecir en un JSON generado a ciegas; es más limpio y confiable delegarlos al ajuste manual del usuario en SolidWorks.
+  2. En `Abrazadera_Brida_Partida_Exacta`, las operaciones 6 y 7 eran dos cuñas parciales reflejadas cuyo vértice convergía exactamente en `(0,0)` *antes* de realizar el agujero pasante central de `Ø50` (operación 8), generando geometría de espesor cero (*Zero-Thickness*) en el origen; además, `_mirror_sketch` invertía `direction` de los arcos sin invertir el orden de recorrido.
+* **Solución Aplicada:**
+  1. Se desactivó el uso automático de `fillet` y `chamfer` 3D en `PROMPT_PARA_CHAT.txt`, `ai/system_prompt.md` y `pieza.json` (dejando las aristas vivas para redondeo manual del usuario).
+  2. En `sw_engine/features.py`, `_mirror_sketch` ahora invierte el orden de segmentos e intercambia `(x1, y1) <-> (x2, y2)` conservando `direction = 1`, y `_optimize_operation_order` ejecuta automáticamente los cortes pasantes (`through_all=True`) antes que los cortes parciales dentro de cada bloque de cortes, logrando la construcción completa de `Abrazadera_Brida_Partida_Exacta` (10 operaciones).
+
+
 

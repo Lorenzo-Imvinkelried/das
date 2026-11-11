@@ -99,4 +99,8 @@ El nombre de los planos base depende del idioma de la plantilla `.prtdot` con la
 * **Selección de Caras/Aristas y Operaciones `VT_VOID` (`Fillet`, `Chamfer`, `Shell`):**
   * En `pywin32` late-binding, las interfaces `IFace2` e `IEdge` NO exponen `Select2()` en su `IDispatch` por defecto (`IEntity` es una interfaz COM separada). Por eso `select_entity()` usa `SelectionManager.AddSelectionListObject(obj, CreateSelectData())` con `Mark=1`.
   * Los métodos `IModelDoc2.FeatureFillet` (5 parámetros), `IModelDoc2.FeatureChamfer` (3 parámetros) y `IModelDoc2.InsertFeatureShell` (2 parámetros) devuelven `VT_VOID` (`None` en Python), por lo que el éxito de la operación se valida comparando el último nombre de operación 3D en el árbol (`get_last_solid_feature_name`).
+* **Simetría (`mirror`) y Reordenamiento CSG (`_optimize_operation_order`):**
+  * `execute_mirror` refleja operaciones de croquis (`ExtrudeBossOperation` / `ExtrudeCutOperation`) mediante `_mirror_sketch`, invirtiendo el sentido de recorrido e intercambiando `(x1, y1) <-> (x2, y2)` cuando `flip_x ^ flip_y` es verdadero para mantener inalterado el sentido de los arcos (`direction = 1`).
+  * `build_part` aplica `_optimize_operation_order` para reordenar bloques contiguos de `ExtrudeCutOperation`, ejecutando los cortes pasantes (`through_all=True`) antes que los cortes parciales en cuña para evitar geometría de espesor cero (*Zero-Thickness*) en `(0,0)`.
+
 

@@ -12,6 +12,7 @@ __pycache__/
 ~$*
 *.swj
 *.tmp
+ultimo_log.txt
 .DS_Store
 Thumbs.db
 
