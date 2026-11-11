@@ -8,16 +8,22 @@ Este documento detalla cómo funciona internamente el paquete `sw_engine/` y las
 
 * **`sw_engine/connection.py`**:
   * Conexión COM (`connect_to_solidworks`).
-  * Creación de documento de pieza (`create_new_part`).
+  * Creación de documento de pieza verificando plantilla `.prtdot` en disco (`create_new_part`, `resolve_valid_part_template`).
   * Conversión de unidades (`mm_to_m`).
   * Invocación segura de métodos de 0 argumentos (`com_call_0`).
-  * Selección segura de entidades (`select_by_id`) y planos multilenguaje (`select_reference_plane`).
+  * Selección segura de entidades (`select_by_id`), planos multilenguaje (`select_reference_plane`) y creación de planos paralelos desfasados (`select_or_create_plane` con `InsertRefPlane`).
+  * Creación de ejes de referencia en la intersección de planos ortogonales (`create_reference_axis` con `InsertAxis2`) e identificación de la última operación 3D sólida (`get_last_solid_feature_name`).
   * Control de preferencias de interfaz (`set_input_dim_on_create`).
 * **`sw_engine/primitives.py`**:
-  * Traducción de figuras 2D Pydantic (`CenterRectangle`, `CornerRectangle`, `Circle`, `Line`) a llamadas de `ISketchManager` (`draw_shape`).
-  * Ciclo de vida completo de un croquis (`build_sketch_on_plane`): seleccionar plano -> `InsertSketch(True)` -> `AddToDB = True` -> dibujar -> `AddToDB = False` -> `ClearSelection2(True)` -> `InsertSketch(True)` -> seleccionar croquis recién creado (`get_last_sketch_name`).
+  * Traducción de 7 figuras 2D Pydantic (`CenterRectangle`, `CornerRectangle`, `Circle`, `Line`, `Polygon`, `Arc`, `Slot`) y línea constructiva (`AxisLine`) a llamadas de `ISketchManager` (`draw_shape`).
+  * Ciclo de vida completo de un croquis (`build_sketch_on_plane`): seleccionar o crear plano desfasado -> `InsertSketch(True)` -> `AddToDB = True` -> dibujar primitivas y `CreateCenterLine` -> `AddToDB = False` -> `SetPickMode` -> `ClearSelection2(True)` -> `InsertSketch(True)` -> seleccionar croquis recién creado (`get_last_sketch_name`).
 * **`sw_engine/features.py`**:
-  * Operaciones 3D en `IFeatureManager`: extrusión de saliente (`execute_extrude_boss` con `FeatureExtrusion2`) y corte extruido (`execute_extrude_cut` con `FeatureCut3`).
+  * Operaciones 3D en `IFeatureManager`:
+    * Extrusión de saliente (`execute_extrude_boss` con `FeatureExtrusion2`, 23 parámetros).
+    * Corte extruido (`execute_extrude_cut` con `FeatureCut3`, 26 parámetros, incluyendo corte hacia ambos lados `both_directions`).
+    * Revolución de saliente y corte por revolución (`execute_revolve` con `FeatureRevolve2`, 20 parámetros).
+    * Matriz circular (`execute_circular_pattern` con `FeatureCircularPattern4`, 7 parámetros).
+    * Matriz lineal (`execute_linear_pattern` con `FeatureLinearPattern3`, 10 parámetros).
   * Orquestador de pieza completa (`build_part`).
 
 ---
@@ -68,4 +74,23 @@ El nombre de los planos base depende del idioma de la plantilla `.prtdot` con la
 * En instalaciones con recursos en español sobre plantillas en inglés, `swDefaultTemplatePart` apunta a `...\Pieza.prtdot` (inexistente), mientras que el archivo real en disco es `...\Part.prtdot`.
 * Si `NewPart()` se ejecuta con una plantilla inexistente, SolidWorks crea una pieza en blanco sin tabla de estilos de cota (`pDimStyle = NULL`, dirección `0x0`), provocando un crash inmediato (`Access Violation at virtual address 0` en `slduiu:016A3C00`) apenas el usuario usa **Cota inteligente**.
 * Por eso `create_new_part()` ejecuta primero `resolve_valid_part_template(sw_app)` y abre la pieza con `sw_app.NewDocument(valid_template_path, 0, 0.0, 0.0)`.
+
+---
+
+## 3. Firmas COM de Operaciones Avanzadas (Verificadas en TypeLib `v26.0` de SW 2018)
+
+* **Planos Paralelos Desfasados (`IFeatureManager::InsertRefPlane`):**
+  * `InsertRefPlane(FirstConstraint, FirstConstraintAngleOrDistance, SecondConstraint, SecondConstraintAngleOrDistance, ThirdConstraint, ThirdConstraintAngleOrDistance)`
+  * `swRefPlaneReferenceConstraint_Distance = 8`, `swRefPlaneReferenceConstraint_OptionFlip = 256` (`8 | 256 = 264` cuando `plane_offset_mm < 0`).
+* **Nuevas Primitivas 2D (`ISketchManager`):**
+  * `CreatePolygon(XC, YC, Zc, Xp, Yp, Zp, Sides, Inscribed)` (8 parámetros).
+  * `CreateArc(XC, YC, Zc, X1, Y1, Z1, X2, Y2, Z2, Direction)` (10 parámetros; `Direction = 1` antihorario, `-1` horario).
+  * `CreateSketchSlot(SlotCreationType, SlotLengthType, Width, X1, Y1, Z1, X2, Y2, Z2, X3, Y3, Z3, CenterArcDirection, AddDimension)` (14 parámetros; `0 = line`, `0 = CenterCenter`).
+  * `CreateCenterLine(X1, Y1, Z1, X2, Y2, Z2)` (6 parámetros; línea constructiva para eje de revolución).
+* **Revolución y Corte por Revolución (`IFeatureManager::FeatureRevolve2`):**
+  * 20 parámetros: `(SingleDir, IsSolid, IsThin, IsCut, ReverseDir, BothDirectionUpToSameEntity, Dir1Type, Dir2Type, Dir1Angle, Dir2Angle, OffsetReverse1, OffsetReverse2, OffsetDistance1, OffsetDistance2, ThinType, ThinThickness1, ThinThickness2, Merge, UseFeatScope, UseAutoSelect)`.
+* **Ejes de Referencia y Matrices (`InsertAxis2`, `FeatureCircularPattern4`, `FeatureLinearPattern3`):**
+  * `IModelDoc2::InsertAxis2(True)` con dos planos base seleccionados (`Mark=0`) crea un `RefAxis` en su intersección (`"Y" = Front+Right`, `"Z" = Top+Right`, `"X" = Front+Top`).
+  * `FeatureCircularPattern4(Number, Spacing, FlipDirection, DName, GeometryPattern, EqualSpacing, VaryInstance)`: requiere seleccionar la operación 3D con `Mark=4` (`"BODYFEATURE"`) y el eje con `Mark=1` (`"AXIS"`).
+  * `FeatureLinearPattern3(Num1, Spacing1, Num2, Spacing2, FlipDir1, FlipDir2, DName1, DName2, GeometryPattern, VaryInstance)`: requiere seleccionar la operación 3D con `Mark=4`, eje X con `Mark=1` y eje Y con `Mark=2`.
 

@@ -4,8 +4,10 @@
     {
       "type": "extrude_boss",
       "plane": "Top",
+      "plane_offset_mm": 0.0,
       "depth_mm": 35.0,
       "midplane": false,
+      "both_directions": false,
       "sketch": {
         "shapes": [
           {
@@ -20,7 +22,9 @@
     {
       "type": "extrude_cut",
       "plane": "Top",
+      "plane_offset_mm": 0.0,
       "through_all": true,
+      "both_directions": false,
       "depth_mm": null,
       "sketch": {
         "shapes": [
@@ -28,7 +32,7 @@
             "kind": "circle",
             "cx": 0.0,
             "cy": 0.0,
-            "diameter": 59.0
+            "diameter": 56.0
           }
         ]
       }
@@ -36,8 +40,10 @@
     {
       "type": "extrude_cut",
       "plane": "Front",
-      "through_all": true,
-      "depth_mm": null,
+      "plane_offset_mm": 0.0,
+      "through_all": false,
+      "both_directions": false,
+      "depth_mm": 40.0,
       "sketch": {
         "shapes": [
           {
@@ -51,28 +57,11 @@
       }
     },
     {
-      "type": "extrude_cut",
-      "plane": "Right",
-      "through_all": true,
-      "depth_mm": null,
-      "sketch": {
-        "shapes": [
-          {
-            "kind": "center_rectangle",
-            "cx": -12.5,
-            "cy": 17.5,
-            "width": 14.0,
-            "height": 22.0
-          },
-          {
-            "kind": "center_rectangle",
-            "cx": 12.5,
-            "cy": 17.5,
-            "width": 14.0,
-            "height": 22.0
-          }
-        ]
-      }
+      "type": "circular_pattern",
+      "instances": 6,
+      "angle_deg": 360.0,
+      "axis": "Y",
+      "equal_spacing": true
     }
   ]
 }
