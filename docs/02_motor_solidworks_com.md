@@ -15,18 +15,20 @@ Este documento detalla cómo funciona internamente el paquete `sw_engine/` y las
   * Creación de ejes de referencia en la intersección de planos ortogonales (`create_reference_axis` con `InsertAxis2`) e identificación de la última operación 3D sólida (`get_last_solid_feature_name`).
   * Control de preferencias de interfaz (`set_input_dim_on_create`).
 * **`sw_engine/primitives.py`**:
-  * Traducción de 7 figuras 2D Pydantic (`CenterRectangle`, `CornerRectangle`, `Circle`, `Line`, `Polygon`, `Arc`, `Slot`) y línea constructiva (`AxisLine`) a llamadas de `ISketchManager` (`draw_shape`).
+  * Traducción de 8 figuras 2D Pydantic (`CenterRectangle`, `CornerRectangle`, `Circle`, `Line`, `Polygon`, `Arc`, `Slot`, `AnnularSector`) y línea constructiva (`AxisLine`) a llamadas de `ISketchManager` (`draw_shape`). `AnnularSector` calcula los vértices en precisión `float64` mediante `math.cos`/`math.sin` para evitar discrepancias geométricas con `revolve_cut`.
   * Ciclo de vida completo de un croquis (`build_sketch_on_plane`): seleccionar o crear plano desfasado -> `InsertSketch(True)` -> `AddToDB = True` -> dibujar primitivas y `CreateCenterLine` -> `AddToDB = False` -> `SetPickMode` -> `ClearSelection2(True)` -> `InsertSketch(True)` -> seleccionar croquis recién creado (`get_last_sketch_name`).
 * **`sw_engine/features.py`**:
-  * Las 9 operaciones 3D en SolidWorks 2018:
+  * Las 10 operaciones 3D en SolidWorks 2018:
     * Extrusión de saliente (`execute_extrude_boss` con `FeatureExtrusion2`, 23 parámetros).
     * Corte extruido (`execute_extrude_cut` con `FeatureCut3`, 26 parámetros, incluyendo corte hacia ambos lados `both_directions`).
     * Revolución de saliente y corte por revolución (`execute_revolve` con `FeatureRevolve2`, 20 parámetros).
     * Matriz circular (`execute_circular_pattern` con `FeatureCircularPattern4`, 7 parámetros).
     * Matriz lineal (`execute_linear_pattern` con `FeatureLinearPattern3`, 10 parámetros).
+    * Simetría 3D / geométrica (`execute_mirror`).
     * Redondeo de aristas (`execute_fillet` con `IModelDoc2.FeatureFillet`, 5 parámetros, `VT_VOID`).
     * Chaflán de aristas (`execute_chamfer` con `IModelDoc2.FeatureChamfer`, 3 parámetros, `VT_VOID`).
     * Vaciado de carcasa (`execute_shell` con `IModelDoc2.InsertFeatureShell`, 2 parámetros, `VT_VOID`, seleccionando la cara exterior mediante normal + bounding box).
+    * Envoltura cilíndrica (`execute_wrap` con `IFeatureManager::InsertWrapFeature2`, 5 parámetros: `Type`, `Thickness`, `ReverseDir`, `Method`, `MeshFactor`), seleccionando el croquis con `Mark=4` y la cara cilíndrica mediante `ISurface.IsCylinder`/`CylinderParams` con `Mark=1`.
   * Orquestador de pieza completa (`build_part`).
 
 ---
@@ -102,5 +104,8 @@ El nombre de los planos base depende del idioma de la plantilla `.prtdot` con la
 * **Simetría (`mirror`) y Reordenamiento CSG (`_optimize_operation_order`):**
   * `execute_mirror` refleja operaciones de croquis (`ExtrudeBossOperation` / `ExtrudeCutOperation`) mediante `_mirror_sketch`, invirtiendo el sentido de recorrido e intercambiando `(x1, y1) <-> (x2, y2)` cuando `flip_x ^ flip_y` es verdadero para mantener inalterado el sentido de los arcos (`direction = 1`).
   * `build_part` aplica `_optimize_operation_order` para reordenar bloques contiguos de `ExtrudeCutOperation`, ejecutando los cortes pasantes (`through_all=True`) antes que los cortes parciales en cuña para evitar geometría de espesor cero (*Zero-Thickness*) en `(0,0)`.
+* **Envoltura Cilíndrica (`IFeatureManager::InsertWrapFeature2`):**
+  * Firma verificada en `sldworks.tlb` (SW 2018): `InsertWrapFeature2(Type, Thickness, ReverseDir, Method, MeshFactor)` con enums de `swconst.tlb`: `swWrapSketchType_Emboss = 0`, `swWrapSketchType_Engrave = 1`, `swWrapSketchType_Scribe = 2` y `swWrapMethods_Analytical = 0`, `swWrapMethods_SplineSurface = 1`.
+  * Requiere preselección del croquis 2D con `Mark=4` (`select_by_id(..., "SKETCH", mark=4)`) y de la cara cilíndrica destino con `Mark=1` (`select_entity(..., mark=1)` filtrada mediante `ISurface.IsCylinder` y `ISurface.CylinderParams`).
 
 

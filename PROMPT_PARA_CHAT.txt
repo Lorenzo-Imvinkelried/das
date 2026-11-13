@@ -126,6 +126,19 @@ No inventes campos ni tipos de operaciones fuera de esta lista exacta:
      }
      (Valores válidos para "open_face": "Top" | "Bottom" | "Front" | "Back" | "Right" | "Left")
 
+  J) Envolver en cilindro ("wrap") -> Graba, eleva o proyecta un croquis 2D cerrado sobre la cara cilíndrica exterior:
+     {
+       "type": "wrap",
+       "mode": "deboss",
+       "plane": "Front",
+       "plane_offset_mm": 25.0,
+       "depth_mm": 2.5,
+       "target_radius_mm": 25.0,
+       "sketch": { "shapes": [ ... ] }
+     }
+     * Valores válidos para "mode": "deboss" (o "engrave", corta/graba hacia adentro), "emboss" (relieve saliente) o "scribe" (línea de partición).
+     * El croquis en "wrap" debe ser un perfil 2D cerrado contenido dentro de la altura de la cara cilíndrica (si corta el borde superior del cilindro, haz el cilindro unos mm más alto, aplica "wrap" y luego recorta el excedente superior con "extrude_cut", o usa "extrude_cut" con "annular_sector").
+
 - Tipos de figuras 2D permitidas dentro de "sketch" -> "shapes":
   1) Rectángulo de centro ("center_rectangle"):
      {"kind": "center_rectangle", "cx": 0.0, "cy": 0.0, "width": 100.0, "height": 50.0}
@@ -147,6 +160,9 @@ No inventes campos ni tipos de operaciones fuera de esta lista exacta:
 
   7) Ranura recta / agujero coliso ("slot") -> entre centros (x1,y1) y (x2,y2) con ancho "width":
      {"kind": "slot", "x1": -15.0, "y1": 0.0, "x2": 15.0, "y2": 0.0, "width": 8.0}
+
+  8) Sector de corona circular por radios y ángulos ("annular_sector") -> PREFÉRELO SIEMPRE antes que calcular "arc"+"line" a mano para sectores angulares (evita escalones de micrones al combinar con "revolve_cut"):
+     {"kind": "annular_sector", "cx": 0.0, "cy": 0.0, "inner_radius": 22.5, "outer_radius": 26.0, "start_angle_deg": 0.0, "end_angle_deg": 16.0}
 
 ====================================================================
 3. EJEMPLO DE SALIDA VÁLIDA (CILINDRO CON 6 VENTANAS RADIALES)

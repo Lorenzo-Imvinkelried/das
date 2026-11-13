@@ -1,6 +1,7 @@
 import math
 from typing import Any, Literal, Optional, Union
 from schemas.cad_schema import (
+    AnnularSector,
     Arc,
     CADPart,
     CenterRectangle,
@@ -22,6 +23,7 @@ from schemas.cad_schema import (
     ShellOperation,
     Sketch,
     Slot,
+    WrapOperation,
 )
 from .connection import (
     com_call_0,
@@ -41,6 +43,13 @@ SW_END_COND_BLIND = 0              # Hasta profundidad especificada
 SW_END_COND_THROUGH_ALL = 1        # Por todo (una dirección)
 SW_END_COND_MID_PLANE = 6          # Plano medio
 SW_END_COND_THROUGH_ALL_BOTH = 9   # Por todo - Ambos lados
+
+# Constantes de operación Wrap en SolidWorks 2018 (verificadas en swconst.tlb)
+SW_WRAP_TYPE_EMBOSS = 0            # swWrapSketchType_Emboss (saliente/relieve)
+SW_WRAP_TYPE_ENGRAVE = 1           # swWrapSketchType_Engrave (deboss/grabado/corte)
+SW_WRAP_TYPE_SCRIBE = 2            # swWrapSketchType_Scribe (línea de partición)
+SW_WRAP_METHOD_ANALYTICAL = 0      # swWrapMethods_Analytical (cilindros y conos analíticos)
+SW_WRAP_METHOD_SPLINE_SURFACE = 1  # swWrapMethods_SplineSurface (fallback multi-cara/complejo)
 
 # Opción de borrado en IModelDocExtension.DeleteSelection2 (swDeleteSelectionOptions_e)
 SW_DELETE_CHILDREN = 1             # swDelete_Children
@@ -519,6 +528,18 @@ def _rotate_sketch(sketch: Sketch, angle_deg: float) -> Sketch:
             x1, y1 = _rotate_point(s.x1, s.y1, rad)
             x2, y2 = _rotate_point(s.x2, s.y2, rad)
             rotated_shapes.append(Slot(x1=x1, y1=y1, x2=x2, y2=y2, width=s.width))
+        elif isinstance(s, AnnularSector):
+            nx, ny = _rotate_point(s.cx, s.cy, rad)
+            rotated_shapes.append(
+                AnnularSector(
+                    cx=nx,
+                    cy=ny,
+                    inner_radius=s.inner_radius,
+                    outer_radius=s.outer_radius,
+                    start_angle_deg=s.start_angle_deg + float(angle_deg),
+                    end_angle_deg=s.end_angle_deg + float(angle_deg),
+                )
+            )
         elif isinstance(s, CenterRectangle):
             hw = s.width / 2.0
             hh = s.height / 2.0
@@ -762,6 +783,28 @@ def _mirror_sketch(sketch: Sketch, flip_x: bool, flip_y: bool) -> Sketch:
             x1, y1 = _mirror_point(s.x1, s.y1, flip_x, flip_y)
             x2, y2 = _mirror_point(s.x2, s.y2, flip_x, flip_y)
             mirrored_shapes.append(CornerRectangle(x1=x1, y1=y1, x2=x2, y2=y2))
+        elif isinstance(s, AnnularSector):
+            nx, ny = _mirror_point(s.cx, s.cy, flip_x, flip_y)
+            a_low = min(float(s.start_angle_deg), float(s.end_angle_deg))
+            a_high = max(float(s.start_angle_deg), float(s.end_angle_deg))
+            if flip_x and not flip_y:
+                new_start, new_end = 180.0 - a_high, 180.0 - a_low
+            elif flip_y and not flip_x:
+                new_start, new_end = -a_high, -a_low
+            elif flip_x and flip_y:
+                new_start, new_end = a_low + 180.0, a_high + 180.0
+            else:
+                new_start, new_end = a_low, a_high
+            mirrored_shapes.append(
+                AnnularSector(
+                    cx=nx,
+                    cy=ny,
+                    inner_radius=s.inner_radius,
+                    outer_radius=s.outer_radius,
+                    start_angle_deg=new_start,
+                    end_angle_deg=new_end,
+                )
+            )
 
     return Sketch(shapes=mirrored_shapes)
 
@@ -1110,6 +1153,168 @@ def execute_shell(model: Any, op: ShellOperation) -> Any:
     return after_name
 
 
+def _find_wrap_cylindrical_faces(
+    model: Any,
+    plane: str,
+    plane_offset_mm: float,
+    target_radius_mm: Optional[float],
+) -> tuple[Any, list[Any]]:
+    """
+    Busca la(s) cara(s) cilíndrica(s) válida(s) cuyo eje sea perpendicular a la normal del croquis.
+    Prioriza coincidencia con target_radius_mm (si se indicó) o el cilindro exterior de mayor radio,
+    desempatando por orientación respecto a plane_offset_mm y área de cara.
+    """
+    plane_normals: dict[str, tuple[float, float, float]] = {
+        "Front": (0.0, 0.0, 1.0),
+        "Top": (0.0, 1.0, 0.0),
+        "Right": (1.0, 0.0, 0.0),
+    }
+    p_norm = plane_normals.get(plane, (0.0, 0.0, 1.0))
+    target_r_m = mm_to_m(target_radius_mm) if target_radius_mm is not None else None
+    offset_sign = 1.0 if plane_offset_mm >= 0.0 else -1.0
+
+    scored: list[tuple[tuple[float, float, float], float, Any]] = []
+    bodies = model.GetBodies2(0, True) or []
+    for body in bodies:
+        for face in com_call_0(body, "GetFaces") or []:
+            try:
+                surf = com_call_0(face, "GetSurface")
+                if surf is None or not bool(com_call_0(surf, "IsCylinder")):
+                    continue
+                cparams = com_call_0(surf, "CylinderParams")
+                if not cparams or len(cparams) < 7:
+                    continue
+                ax, ay, az = float(cparams[3]), float(cparams[4]), float(cparams[5])
+                radius_m = float(cparams[6])
+                if abs(ax * p_norm[0] + ay * p_norm[1] + az * p_norm[2]) > 0.25:
+                    continue
+
+                face_area = float(com_call_0(face, "GetArea") or 0.0)
+                box = com_call_0(face, "GetBox")
+                side_proj = 0.0
+                if box and len(box) >= 6:
+                    fcx = 0.5 * (float(box[0]) + float(box[3]))
+                    fcy = 0.5 * (float(box[1]) + float(box[4]))
+                    fcz = 0.5 * (float(box[2]) + float(box[5]))
+                    side_proj = offset_sign * (
+                        fcx * p_norm[0] + fcy * p_norm[1] + fcz * p_norm[2]
+                    )
+
+                primary = (
+                    round(abs(radius_m - target_r_m), 6)
+                    if target_r_m is not None
+                    else -round(radius_m, 6)
+                )
+                key = (primary, -round(side_proj, 6), -round(face_area, 8))
+                scored.append((key, radius_m, face))
+            except Exception:
+                pass
+
+    if not scored:
+        raise RuntimeError(
+            f"No se encontró ninguna cara cilíndrica válida paralela al plano '{plane}' para aplicar Wrap."
+        )
+
+    scored.sort(key=lambda item: item[0])
+    best_radius_m = scored[0][1]
+    best_face = scored[0][2]
+    same_radius_faces = [f for _, r_m, f in scored if abs(r_m - best_radius_m) <= 2e-4]
+    return best_face, same_radius_faces
+
+
+def _try_insert_wrap_feature(
+    model: Any,
+    sketch_name: str,
+    faces: list[Any],
+    wrap_type: int,
+    thickness_m: float,
+    reverse_dir: bool,
+    method: int,
+) -> Any:
+    """Selecciona el croquis (Mark=4) y la(s) cara(s) destino (Mark=1) e invoca InsertWrapFeature2."""
+    model.ClearSelection2(True)
+    if not select_by_id(model, sketch_name, "SKETCH", 0.0, 0.0, 0.0, append=False, mark=4):
+        return None
+    selected_faces = 0
+    for face in faces:
+        if select_entity(model, face, append=True, mark=1):
+            selected_faces += 1
+    if selected_faces == 0:
+        return None
+
+    return model.FeatureManager.InsertWrapFeature2(
+        int(wrap_type),
+        float(thickness_m),
+        bool(reverse_dir),
+        int(method),
+        5,
+    )
+
+
+def execute_wrap(model: Any, op: WrapOperation) -> Any:
+    """
+    Ejecuta una operación de envoltura (IFeatureManager::InsertWrapFeature2) sobre una cara cilíndrica.
+    Soporta modos 'deboss'/'engrave', 'emboss' y 'scribe', probando Analytical y SplineSurface.
+    """
+    wrap_type_map: dict[str, int] = {
+        "emboss": SW_WRAP_TYPE_EMBOSS,
+        "deboss": SW_WRAP_TYPE_ENGRAVE,
+        "engrave": SW_WRAP_TYPE_ENGRAVE,
+        "scribe": SW_WRAP_TYPE_SCRIBE,
+    }
+    wrap_type = wrap_type_map[op.mode]
+    thickness_m = mm_to_m(op.depth_mm)
+
+    sketch_name = build_sketch_on_plane(
+        model,
+        op.plane,
+        op.sketch,
+        plane_offset_mm=op.plane_offset_mm,
+    )
+
+    best_face, same_radius_faces = _find_wrap_cylindrical_faces(
+        model,
+        plane=op.plane,
+        plane_offset_mm=op.plane_offset_mm,
+        target_radius_mm=op.target_radius_mm,
+    )
+
+    rev_primary = bool(op.reverse_dir)
+    attempts: list[tuple[list[Any], int, bool]] = [
+        ([best_face], SW_WRAP_METHOD_ANALYTICAL, rev_primary),
+        ([best_face], SW_WRAP_METHOD_SPLINE_SURFACE, rev_primary),
+        ([best_face], SW_WRAP_METHOD_ANALYTICAL, not rev_primary),
+        ([best_face], SW_WRAP_METHOD_SPLINE_SURFACE, not rev_primary),
+    ]
+    if len(same_radius_faces) > 1:
+        attempts.append((same_radius_faces, SW_WRAP_METHOD_SPLINE_SURFACE, rev_primary))
+        attempts.append((same_radius_faces, SW_WRAP_METHOD_SPLINE_SURFACE, not rev_primary))
+
+    feat = None
+    for target_faces, method, rev_dir in attempts:
+        feat = _try_insert_wrap_feature(
+            model=model,
+            sketch_name=sketch_name,
+            faces=target_faces,
+            wrap_type=wrap_type,
+            thickness_m=thickness_m,
+            reverse_dir=rev_dir,
+            method=method,
+        )
+        if feat is not None:
+            break
+
+    if feat is None:
+        raise RuntimeError(
+            f"Falló InsertWrapFeature2 (mode='{op.mode}', depth={op.depth_mm} mm) "
+            f"para el croquis '{sketch_name}' en el plano '{op.plane}'. "
+            "Verifica que el croquis sea un contorno cerrado contenido dentro de la cara cilíndrica."
+        )
+
+    model.ClearSelection2(True)
+    return feat
+
+
 def execute_operation(
     model: Any,
     op: OperationType,
@@ -1136,6 +1341,8 @@ def execute_operation(
         return execute_chamfer(model, op)
     if isinstance(op, ShellOperation):
         return execute_shell(model, op)
+    if isinstance(op, WrapOperation):
+        return execute_wrap(model, op)
     raise ValueError(f"Tipo de operación no soportada: {type(op)}")
 
 
@@ -1153,6 +1360,9 @@ def _format_operation_summary(op: OperationType) -> str:
         return f"'{op.type}' ({op.distance_mm:g} mm x {op.angle_deg:g}°)"
     if isinstance(op, ShellOperation):
         return f"'{op.type}' (espesor {op.thickness_mm:g} mm, cara abierta '{op.open_face}')"
+    if isinstance(op, WrapOperation):
+        offset_info = f" (offset {op.plane_offset_mm:g} mm)" if abs(op.plane_offset_mm) > 1e-6 else ""
+        return f"'{op.type}' ({op.mode}, {op.depth_mm:g} mm en '{op.plane}'{offset_info}, {len(op.sketch.shapes)} figura(s))"
     offset_info = f" (offset {op.plane_offset_mm:g} mm)" if abs(op.plane_offset_mm) > 1e-6 else ""
     return f"'{op.type}' en plano '{op.plane}'{offset_info} ({len(op.sketch.shapes)} figura(s))"
 

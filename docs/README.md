@@ -29,7 +29,7 @@ Esta carpeta centraliza todo el conocimiento técnico, decisiones de arquitectur
 ## Estado Actual del Proyecto
 
 * **Fase 1 + Expansión Geométrica 80/20 (Completadas):**
-  * Esquemas Pydantic en `schemas/cad_schema.py` con **10 operaciones 3D** (`extrude_boss`, `extrude_cut`, `revolve_boss`, `revolve_cut`, `circular_pattern`, `linear_pattern`, `mirror`, `fillet` con filtro inteligente de aristas `edges`, `chamfer`, `shell`), **7 primitivas 2D** (`center_rectangle`, `corner_rectangle`, `circle`, `line`, `polygon`, `arc`, `slot`), **planos paralelos desfasados** (`plane_offset_mm`) y **corte bilateral** (`both_directions`).
+  * Esquemas Pydantic en `schemas/cad_schema.py` con **11 operaciones 3D** (`extrude_boss`, `extrude_cut`, `revolve_boss`, `revolve_cut`, `circular_pattern`, `linear_pattern`, `mirror`, `fillet` con filtro inteligente de aristas `edges`, `chamfer`, `shell`, `wrap`), **8 primitivas 2D** (`center_rectangle`, `corner_rectangle`, `circle`, `line`, `polygon`, `arc`, `slot`, `annular_sector`), **planos paralelos desfasados** (`plane_offset_mm`) y **corte bilateral** (`both_directions`).
   * Motor de ejecución local `sw_engine` conectado a SolidWorks 2018 (`connection.py`, `primitives.py`, `features.py`).
   * Script de prueba `test_engine.py` y archivo de ejemplo `pieza.json` (`Cilindro_6_Ventanas_60mm`).
 * **Modo Chat sin API (Completado):**

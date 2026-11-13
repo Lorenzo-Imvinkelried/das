@@ -1,6 +1,7 @@
 import math
 from typing import Any, Optional
 from schemas.cad_schema import (
+    AnnularSector,
     Arc,
     AxisLine,
     CenterRectangle,
@@ -22,6 +23,37 @@ from .connection import (
 # Constantes de ranura de croquis (swSketchSlotCreationType_e / swSketchSlotLengthType_e)
 SW_SLOT_TYPE_LINE = 0           # swSketchSlotCreationType_line (ranura recta)
 SW_SLOT_LENGTH_CENTER_CENTER = 0  # swSketchSlotLengthType_CenterCenter (distancia entre centros)
+
+
+def _draw_annular_sector(sketch_mgr: Any, shape: AnnularSector) -> Any:
+    """
+    Dibuja un sector de corona circular cerrado (2 arcos concéntricos + 2 líneas radiales, o cuña si inner_radius == 0)
+    calculando todos los vértices con precisión float64 completa a partir de radios y ángulos en grados.
+    """
+    a1 = math.radians(min(float(shape.start_angle_deg), float(shape.end_angle_deg)))
+    a2 = math.radians(max(float(shape.start_angle_deg), float(shape.end_angle_deg)))
+
+    cx_m = mm_to_m(shape.cx)
+    cy_m = mm_to_m(shape.cy)
+    x1_out_m = mm_to_m(shape.cx + shape.outer_radius * math.cos(a1))
+    y1_out_m = mm_to_m(shape.cy + shape.outer_radius * math.sin(a1))
+    x2_out_m = mm_to_m(shape.cx + shape.outer_radius * math.cos(a2))
+    y2_out_m = mm_to_m(shape.cy + shape.outer_radius * math.sin(a2))
+
+    if shape.inner_radius > 1e-6:
+        x1_in_m = mm_to_m(shape.cx + shape.inner_radius * math.cos(a1))
+        y1_in_m = mm_to_m(shape.cy + shape.inner_radius * math.sin(a1))
+        x2_in_m = mm_to_m(shape.cx + shape.inner_radius * math.cos(a2))
+        y2_in_m = mm_to_m(shape.cy + shape.inner_radius * math.sin(a2))
+
+        sketch_mgr.CreateArc(cx_m, cy_m, 0.0, x1_in_m, y1_in_m, 0.0, x2_in_m, y2_in_m, 0.0, 1)
+        sketch_mgr.CreateLine(x2_in_m, y2_in_m, 0.0, x2_out_m, y2_out_m, 0.0)
+        sketch_mgr.CreateArc(cx_m, cy_m, 0.0, x2_out_m, y2_out_m, 0.0, x1_out_m, y1_out_m, 0.0, -1)
+        return sketch_mgr.CreateLine(x1_out_m, y1_out_m, 0.0, x1_in_m, y1_in_m, 0.0)
+
+    sketch_mgr.CreateLine(cx_m, cy_m, 0.0, x1_out_m, y1_out_m, 0.0)
+    sketch_mgr.CreateArc(cx_m, cy_m, 0.0, x1_out_m, y1_out_m, 0.0, x2_out_m, y2_out_m, 0.0, 1)
+    return sketch_mgr.CreateLine(x2_out_m, y2_out_m, 0.0, cx_m, cy_m, 0.0)
 
 
 def draw_shape(sketch_mgr: Any, shape: ShapeType) -> Any:
@@ -136,6 +168,9 @@ def draw_shape(sketch_mgr: Any, shape: ShapeType) -> Any:
             1,
             False,
         )
+
+    if isinstance(shape, AnnularSector):
+        return _draw_annular_sector(sketch_mgr, shape)
 
     raise ValueError(f"Tipo de figura de croquis no soportado: {type(shape)}")
 

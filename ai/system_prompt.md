@@ -28,6 +28,7 @@ No inventes campos ni tipos de operaciones fuera de esta lista exacta:
   - `"fillet"`: `{"type": "fillet", "radius_mm": 2.0, "edges": "last_feature"}` (`"edges"` en `"last_feature"`, `"vertical"`, `"horizontal_slot_ends"`, `"all"`)
   - `"chamfer"`: `{"type": "chamfer", "distance_mm": 1.5, "angle_deg": 45.0}`
   - `"shell"`: `{"type": "shell", "thickness_mm": 2.0, "open_face": "Top", "outward": false}` (`"open_face"` en `"Top"`, `"Bottom"`, `"Front"`, `"Back"`, `"Right"`, `"Left"`)
+  - `"wrap"`: `{"type": "wrap", "mode": "deboss", "plane": "Front", "plane_offset_mm": 25.0, "depth_mm": 2.5, "target_radius_mm": 25.0, "sketch": {"shapes": [...]}}` (`"mode"` en `"deboss"`, `"engrave"`, `"emboss"`, `"scribe"`; para croquis cerrado contenido dentro de la cara cilíndrica)
 - **Figuras 2D (`kind` dentro de `sketch.shapes`):**
   - `"center_rectangle"`: `{"kind": "center_rectangle", "cx": 0.0, "cy": 0.0, "width": 100.0, "height": 50.0}`
   - `"corner_rectangle"`: `{"kind": "corner_rectangle", "x1": 0.0, "y1": 0.0, "x2": 100.0, "y2": 50.0}`
@@ -36,5 +37,6 @@ No inventes campos ni tipos de operaciones fuera de esta lista exacta:
   - `"polygon"`: `{"kind": "polygon", "cx": 0.0, "cy": 0.0, "diameter": 12.0, "sides": 6, "inscribed": true}`
   - `"arc"`: `{"kind": "arc", "cx": 0.0, "cy": 0.0, "x1": 10.0, "y1": 0.0, "x2": 0.0, "y2": 10.0, "direction": 1}`
   - `"slot"`: `{"kind": "slot", "x1": -10.0, "y1": 0.0, "x2": 10.0, "y2": 0.0, "width": 6.0}`
+  - `"annular_sector"`: `{"kind": "annular_sector", "cx": 0.0, "cy": 0.0, "inner_radius": 22.5, "outer_radius": 26.0, "start_angle_deg": 0.0, "end_angle_deg": 16.0}` (cálculo interno `float64`, preférelo a calcular `arc` a mano en grados)
 
 Responde ÚNICAMENTE con un objeto JSON válido que respete este esquema.

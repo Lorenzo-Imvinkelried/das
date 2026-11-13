@@ -1,3 +1,4 @@
+import math
 from typing import Annotated, Literal, Optional, Union
 from pydantic import BaseModel, Field, model_validator
 
@@ -79,8 +80,34 @@ class Slot(BaseModel):
     width: float = Field(..., gt=0.0, description="Ancho total (diámetro de los extremos) de la ranura en mm")
 
 
+class AnnularSector(BaseModel):
+    """Sector de corona circular cerrado por radio interior, radio exterior y ángulos inicial/final en grados."""
+
+    kind: Literal["annular_sector"] = "annular_sector"
+    cx: float = Field(default=0.0, description="Coordenada X del centro en milímetros (mm)")
+    cy: float = Field(default=0.0, description="Coordenada Y del centro en milímetros (mm)")
+    inner_radius: float = Field(default=0.0, ge=0.0, description="Radio interior del sector en mm (0 = sector circular)")
+    outer_radius: float = Field(..., gt=0.0, description="Radio exterior del sector en mm")
+    start_angle_deg: float = Field(..., description="Ángulo inicial en grados respecto al semieje +X")
+    end_angle_deg: float = Field(..., description="Ángulo final en grados respecto al semieje +X")
+
+    @model_validator(mode="after")
+    def validate_sector_geometry(self) -> "AnnularSector":
+        if self.outer_radius <= self.inner_radius:
+            raise ValueError(
+                f"'outer_radius' ({self.outer_radius}) debe ser mayor que 'inner_radius' ({self.inner_radius})."
+            )
+        sweep = abs(float(self.end_angle_deg) - float(self.start_angle_deg))
+        if sweep <= 1e-6 or sweep >= 360.0 - 1e-6 or math.isclose(sweep % 360.0, 0.0, abs_tol=1e-6):
+            raise ValueError(
+                "El barrido angular de 'annular_sector' debe ser estrictamente mayor a 0° y menor a 360° "
+                "(para 360° completos usa 'circle')."
+            )
+        return self
+
+
 ShapeType = Annotated[
-    Union[CenterRectangle, CornerRectangle, Circle, Line, Polygon, Arc, Slot],
+    Union[CenterRectangle, CornerRectangle, Circle, Line, Polygon, Arc, Slot, AnnularSector],
     Field(discriminator="kind"),
 ]
 
@@ -297,6 +324,39 @@ class ShellOperation(BaseModel):
     outward: bool = Field(default=False, description="Si es True, agrega el espesor hacia afuera")
 
 
+class WrapOperation(BaseModel):
+    """Operación 3D de envoltura (Wrap) de un croquis 2D cerrado sobre la cara cilíndrica exterior."""
+
+    type: Literal["wrap"] = "wrap"
+    mode: Literal["emboss", "deboss", "engrave", "scribe"] = Field(
+        default="deboss",
+        description="Tipo de envoltura: 'deboss'/'engrave' (corte/grabado), 'emboss' (relieve saliente) o 'scribe' (línea de partición)",
+    )
+    plane: PlaneType = Field(
+        default="Front",
+        description="Plano de referencia donde se dibuja el perfil plano a envolver ('Front', 'Top', 'Right')",
+    )
+    plane_offset_mm: float = Field(
+        default=0.0,
+        description="Desfase del plano en mm (normalmente igual al radio exterior para hacerlo tangente al cilindro)",
+    )
+    depth_mm: float = Field(
+        default=1.0,
+        gt=0.0,
+        description="Profundidad del grabado/relieve en milímetros (mm)",
+    )
+    target_radius_mm: Optional[float] = Field(
+        default=None,
+        gt=0.0,
+        description="Radio exterior objetivo de la cara cilíndrica en mm (opcional; ayuda a distinguir cara exterior vs interior)",
+    )
+    reverse_dir: bool = Field(
+        default=False,
+        description="Si es True, invierte la dirección de proyección de la envoltura",
+    )
+    sketch: Sketch
+
+
 OperationType = Annotated[
     Union[
         ExtrudeBossOperation,
@@ -309,6 +369,7 @@ OperationType = Annotated[
         FilletOperation,
         ChamferOperation,
         ShellOperation,
+        WrapOperation,
     ],
     Field(discriminator="type"),
 ]
