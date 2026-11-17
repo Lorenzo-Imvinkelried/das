@@ -165,6 +165,18 @@ Este documento registra cada problema real encontrado durante la construcción y
   2. **Operación 3D [`WrapOperation`](file:///d:/Usuario/Desktop/sketch2solid/schemas/cad_schema.py) (`"type": "wrap"`) y [`execute_wrap`](file:///d:/Usuario/Desktop/sketch2solid/sw_engine/features.py):** Envuelve un croquis 2D cerrado sobre la cara cilíndrica mediante `IFeatureManager::InsertWrapFeature2` (probando `Analytical` y `SplineSurface`, seleccionando el croquis con `Mark=4` y la cara cilíndrica con `Mark=1` identificada vía `ISurface.IsCylinder`/`CylinderParams`). Se documentó además la precaución de mantener el croquis de `wrap` dentro de la altura de la cara cilíndrica (o recortar un cilindro más largo después) si la ranura abre hacia el borde superior.
   3. Se actualizaron [`PROMPT_PARA_CHAT.txt`](file:///d:/Usuario/Desktop/sketch2solid/PROMPT_PARA_CHAT.txt) y [`ai/system_prompt.md`](file:///d:/Usuario/Desktop/sketch2solid/ai/system_prompt.md) con ambas capacidades.
 
+---
+
+## Incidente #14: `Falló FeatureCut3 al descomponer figura 'circle' en el plano 'Right'` en caja hueca (`Caja_Estanca_LoRa_ESP32`)
+* **Síntoma:** Las operaciones `[1/7]` a `[6/7]` de `Caja_Estanca_LoRa_ESP32` (`pieza.json`) se ejecutaron con éxito, pero la operación `[7/7]` (`extrude_cut` en `'Right'`, `plane_offset_mm: 0.0`, `through_all: false`, `both_directions: true`, `depth_mm: 40.0`, 3 círculos) falló tanto en croquis combinado como al descomponer círculo por círculo.
+* **Causa Raíz Geométrica:**
+  1. **Corte ciego terminado en aire interior sin tocar ninguna pared:** En `Caja_Estanca_LoRa_ESP32`, el cuerpo exterior mide `110.0 mm` en X (`[-55.0, +55.0]`) y el vaciado interior mide `102.0 mm` en X (`[-51.0, +51.0]`), dejando las paredes laterales únicamente entre `|X| = 51.0 mm` y `|X| = 55.0 mm`. Al cortar desde `'Right'` (`X = 0`) con `through_all: false` y `depth_mm: 40.0` (ya sea `±20 mm` en plano medio o `0..±40 mm` / `±40 mm` por lado), la geometría de corte muere antes de llegar a `±51.0 mm` (en aire hueco interior), por lo que SolidWorks devuelve `None`.
+  2. **Falta de intento bilateral `depth_mm` por lado y mensaje opaco:** `_cut_single_sketch` probaba `MID_PLANE(depth)` y `(depth/2, depth/2)` antes de caer en corte unilateral, sin probar `sd=False` con `(depth, depth)` por lado, y el `RuntimeError` final no mostraba el rango real del sólido en el eje de corte.
+* **Solución Aplicada:**
+  1. En [`_cut_single_sketch`](file:///d:/Usuario/Desktop/sketch2solid/sw_engine/features.py#L352-L364) (`sw_engine/features.py`), cuando `both_directions=True` y `through_all=False`, si falla la profundidad total centrada (`±depth/2`), se intenta también `sd=False` con `(depth_m, depth_m)` hacia cada lado antes de caer a dirección única.
+  2. En [`_describe_cut_failure`](file:///d:/Usuario/Desktop/sketch2solid/sw_engine/features.py#L405-L433) y [`execute_extrude_cut`](file:///d:/Usuario/Desktop/sketch2solid/sw_engine/features.py#L469-L480), ante un fallo de `FeatureCut3`, se consulta `GetPartBox(True)` para reportar los parámetros del corte y la envolvente real del sólido en el eje normal al croquis.
+  3. En [`PROMPT_PARA_CHAT.txt`](file:///d:/Usuario/Desktop/sketch2solid/PROMPT_PARA_CHAT.txt) y [`ai/system_prompt.md`](file:///d:/Usuario/Desktop/sketch2solid/ai/system_prompt.md), se agregó la regla explícita de usar `"through_all": true` (o `"plane_offset_mm"` en la cara exterior `±ancho/2`) al perforar paredes de cajas huecas desde un plano central.
+
 
 
 

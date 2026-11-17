@@ -351,6 +351,17 @@ def _cut_single_sketch(
             )
             if feat is None and sketch_name:
                 select_by_id(model, sketch_name, "SKETCH", 0.0, 0.0, 0.0, append=False, mark=0)
+                feat = _call_feature_cut3(
+                    feat_mgr=feat_mgr,
+                    sd=False,
+                    reverse_dir=False,
+                    end_cond_1=SW_END_COND_BLIND,
+                    end_cond_2=SW_END_COND_BLIND,
+                    depth_1_m=depth_m,
+                    depth_2_m=depth_m,
+                )
+                if feat is None and sketch_name:
+                    select_by_id(model, sketch_name, "SKETCH", 0.0, 0.0, 0.0, append=False, mark=0)
 
     # 2. Intentar en dirección +Normal (Dir=True)
     if feat is None:
@@ -390,6 +401,38 @@ def _cut_single_sketch(
     return feat
 
 
+def _describe_cut_failure(model: Any, op: ExtrudeCutOperation) -> str:
+    """Devuelve rango del sólido y parámetros del corte para diagnosticar fallos de FeatureCut3."""
+    axis_map: dict[str, tuple[str, int, int]] = {
+        "Right": ("X", 0, 3),
+        "Top": ("Y", 1, 4),
+        "Front": ("Z", 2, 5),
+    }
+    axis_name, min_idx, max_idx = axis_map.get(op.plane, ("Z", 2, 5))
+    solid_span = ""
+    try:
+        box = model.GetPartBox(True)
+        if box and len(box) >= 6:
+            min_mm = float(box[min_idx]) * 1000.0
+            max_mm = float(box[max_idx]) * 1000.0
+            solid_span = f" | Sólido en eje {axis_name}: [{min_mm:.1f}, {max_mm:.1f}] mm"
+    except Exception:
+        pass
+
+    hint = ""
+    if not op.through_all:
+        hint = (
+            " Verifica si 'plane_offset_mm' y 'depth_mm' alcanzan una pared sólida sin quedar "
+            "dentro de una cavidad hueca (para atravesar paredes desde un plano central usa 'through_all': true)."
+        )
+
+    return (
+        f"[plane='{op.plane}', offset={op.plane_offset_mm:g} mm, "
+        f"through_all={op.through_all}, both_directions={op.both_directions}, "
+        f"depth_mm={op.depth_mm}{solid_span}].{hint}"
+    )
+
+
 def execute_extrude_cut(model: Any, op: ExtrudeCutOperation) -> Any:
     """
     Ejecuta una operación de corte extruido (FeatureCut3) en SolidWorks 2018.
@@ -424,13 +467,15 @@ def execute_extrude_cut(model: Any, op: ExtrudeCutOperation) -> Any:
             )
             feat = _cut_single_sketch(model, sub_sketch_name, op, end_cond_1, depth_m)
             if feat is None:
+                detail = _describe_cut_failure(model, op)
                 raise RuntimeError(
-                    f"Falló FeatureCut3 al descomponer figura '{shape.kind}' en el plano '{op.plane}'."
+                    f"Falló FeatureCut3 al descomponer figura '{shape.kind}' en el plano '{op.plane}'. {detail}"
                 )
 
     if feat is None:
+        detail = _describe_cut_failure(model, op)
         raise RuntimeError(
-            f"Falló FeatureCut3 para el croquis '{sketch_name}' en el plano '{op.plane}'."
+            f"Falló FeatureCut3 para el croquis '{sketch_name}' en el plano '{op.plane}'. {detail}"
         )
 
     model.ClearSelection2(True)
