@@ -1,196 +1,123 @@
 {
-  "part_name": "Caja_Estanca_LoRa_ESP32",
+  "part_name": "Tapa_Paraguas_180mm_PortaBics",
   "operations": [
     {
       "type": "extrude_boss",
       "plane": "Top",
       "plane_offset_mm": 0.0,
+      "depth_mm": 3.5,
+      "midplane": false,
+      "both_directions": false,
+      "sketch": {
+        "shapes": [
+          {
+            "kind": "circle",
+            "cx": 0.0,
+            "cy": 0.0,
+            "diameter": 180.0
+          },
+          {
+            "kind": "circle",
+            "cx": -22.0,
+            "cy": 0.0,
+            "diameter": 9.0
+          },
+          {
+            "kind": "circle",
+            "cx": 22.0,
+            "cy": 0.0,
+            "diameter": 9.0
+          }
+        ]
+      }
+    },
+    {
+      "type": "extrude_boss",
+      "plane": "Top",
+      "plane_offset_mm": 3.5,
+      "depth_mm": 16.5,
+      "midplane": false,
+      "both_directions": false,
+      "sketch": {
+        "shapes": [
+          {
+            "kind": "circle",
+            "cx": 0.0,
+            "cy": 0.0,
+            "diameter": 110.0
+          },
+          {
+            "kind": "circle",
+            "cx": 0.0,
+            "cy": 0.0,
+            "diameter": 104.6
+          }
+        ]
+      }
+    },
+    {
+      "type": "extrude_boss",
+      "plane": "Top",
+      "plane_offset_mm": 3.5,
+      "depth_mm": 10.0,
+      "midplane": false,
+      "both_directions": false,
+      "sketch": {
+        "shapes": [
+          {
+            "kind": "circle",
+            "cx": -22.0,
+            "cy": 0.0,
+            "diameter": 14.0
+          },
+          {
+            "kind": "circle",
+            "cx": -22.0,
+            "cy": 0.0,
+            "diameter": 9.0
+          },
+          {
+            "kind": "circle",
+            "cx": 22.0,
+            "cy": 0.0,
+            "diameter": 14.0
+          },
+          {
+            "kind": "circle",
+            "cx": 22.0,
+            "cy": 0.0,
+            "diameter": 9.0
+          }
+        ]
+      }
+    },
+    {
+      "type": "extrude_boss",
+      "plane": "Top",
+      "plane_offset_mm": 13.9,
       "depth_mm": 4.0,
       "midplane": false,
       "both_directions": false,
       "sketch": {
         "shapes": [
           {
-            "kind": "center_rectangle",
+            "kind": "annular_sector",
             "cx": 0.0,
             "cy": 0.0,
-            "width": 140.0,
-            "height": 70.0
+            "inner_radius": 50.5,
+            "outer_radius": 52.5,
+            "start_angle_deg": 0.0,
+            "end_angle_deg": 7.0
           }
         ]
       }
     },
     {
-      "type": "extrude_boss",
-      "plane": "Top",
-      "plane_offset_mm": 0.0,
-      "depth_mm": 55.0,
-      "midplane": false,
-      "both_directions": false,
-      "sketch": {
-        "shapes": [
-          {
-            "kind": "center_rectangle",
-            "cx": 0.0,
-            "cy": 0.0,
-            "width": 110.0,
-            "height": 85.0
-          }
-        ]
-      }
-    },
-    {
-      "type": "extrude_cut",
-      "plane": "Top",
-      "plane_offset_mm": 3.0,
-      "through_all": false,
-      "both_directions": false,
-      "depth_mm": 55.0,
-      "sketch": {
-        "shapes": [
-          {
-            "kind": "center_rectangle",
-            "cx": 0.0,
-            "cy": 0.0,
-            "width": 102.0,
-            "height": 77.0
-          }
-        ]
-      }
-    },
-    {
-      "type": "extrude_boss",
-      "plane": "Top",
-      "plane_offset_mm": 3.0,
-      "depth_mm": 52.0,
-      "midplane": false,
-      "both_directions": false,
-      "sketch": {
-        "shapes": [
-          {
-            "kind": "corner_rectangle",
-            "x1": 41.0,
-            "y1": 28.5,
-            "x2": 51.0,
-            "y2": 38.5
-          },
-          {
-            "kind": "corner_rectangle",
-            "x1": -51.0,
-            "y1": 28.5,
-            "x2": -41.0,
-            "y2": 38.5
-          },
-          {
-            "kind": "corner_rectangle",
-            "x1": -51.0,
-            "y1": -38.5,
-            "x2": -41.0,
-            "y2": -28.5
-          },
-          {
-            "kind": "corner_rectangle",
-            "x1": 41.0,
-            "y1": -38.5,
-            "x2": 51.0,
-            "y2": -28.5
-          }
-        ]
-      }
-    },
-    {
-      "type": "extrude_cut",
-      "plane": "Top",
-      "plane_offset_mm": 35.0,
-      "through_all": false,
-      "both_directions": false,
-      "depth_mm": 25.0,
-      "sketch": {
-        "shapes": [
-          {
-            "kind": "circle",
-            "cx": 46.0,
-            "cy": 33.5,
-            "diameter": 2.8
-          },
-          {
-            "kind": "circle",
-            "cx": -46.0,
-            "cy": 33.5,
-            "diameter": 2.8
-          },
-          {
-            "kind": "circle",
-            "cx": -46.0,
-            "cy": -33.5,
-            "diameter": 2.8
-          },
-          {
-            "kind": "circle",
-            "cx": 46.0,
-            "cy": -33.5,
-            "diameter": 2.8
-          }
-        ]
-      }
-    },
-    {
-      "type": "extrude_cut",
-      "plane": "Top",
-      "plane_offset_mm": 0.0,
-      "through_all": true,
-      "both_directions": true,
-      "depth_mm": null,
-      "sketch": {
-        "shapes": [
-          {
-            "kind": "slot",
-            "x1": 62.0,
-            "y1": -20.0,
-            "x2": 62.0,
-            "y2": 20.0,
-            "width": 5.5
-          },
-          {
-            "kind": "slot",
-            "x1": -62.0,
-            "y1": -20.0,
-            "x2": -62.0,
-            "y2": 20.0,
-            "width": 5.5
-          }
-        ]
-      }
-    },
-    {
-      "type": "extrude_cut",
-      "plane": "Front",
-      "plane_offset_mm": 42.5,
-      "through_all": false,
-      "both_directions": true,
-      "depth_mm": 10.0,
-      "sketch": {
-        "shapes": [
-          {
-            "kind": "circle",
-            "cx": -28.0,
-            "cy": 25.0,
-            "diameter": 12.5
-          },
-          {
-            "kind": "circle",
-            "cx": 28.0,
-            "cy": 25.0,
-            "diameter": 12.5
-          },
-          {
-            "kind": "circle",
-            "cx": 0.0,
-            "cy": 25.0,
-            "diameter": 14.0
-          }
-        ]
-      }
+      "type": "circular_pattern",
+      "instances": 4,
+      "angle_deg": 360.0,
+      "axis": "Y",
+      "equal_spacing": true
     }
   ]
 }

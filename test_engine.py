@@ -2,7 +2,7 @@ import json
 import sys
 import traceback
 from schemas.cad_schema import CADPart
-from sw_engine import build_part, com_call_0
+from sw_engine import build_part, com_call_0, get_connected_version_info
 
 SAMPLE_PART_JSON = """
 {
@@ -73,14 +73,15 @@ def main() -> int:
     print(f"  -> Pieza validada: '{part.part_name}' ({len(part.operations)} operaciones)")
     print(json.dumps(part.model_dump(), indent=2, ensure_ascii=False))
 
-    # 2. Ejecutar la construcción en vivo en SolidWorks 2018
-    print("\n[2/2] Conectando a SolidWorks 2018 y construyendo pieza en vivo...")
+    # 2. Ejecutar la construcción en vivo en SOLIDWORKS (2017–2026)
+    print("\n[2/2] Conectando a SOLIDWORKS y construyendo pieza en vivo...")
     model = build_part(part)
+    ver_label = get_connected_version_info().display_name
     try:
         doc_title = str(com_call_0(model, "GetTitle"))
     except Exception:
         doc_title = part.part_name
-    print(f"\n[OK] Pieza generada exitosamente en SolidWorks 2018 (Documento: '{doc_title}').")
+    print(f"\n[OK] Pieza generada exitosamente en {ver_label} (Documento: '{doc_title}').")
     return 0
 
 

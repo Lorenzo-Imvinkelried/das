@@ -1,19 +1,31 @@
-# 02. Motor de Ejecución COM en SolidWorks 2018 (`sw_engine`)
+# 02. Motor de Ejecución COM en SOLIDWORKS 2017–2026+ (`sw_engine`)
 
-Este documento detalla cómo funciona internamente el paquete `sw_engine/` y las reglas estrictas necesarias para que `pywin32` funcione sin crashear contra **SolidWorks 2018**.
+Este documento detalla cómo funciona internamente el paquete `sw_engine/` y las reglas estrictas necesarias para que `pywin32` funcione sin crashear contra **SOLIDWORKS 2017 a 2026+ en Windows**.
 
 ---
 
 ## 1. Mapa de Responsabilidades dentro de `sw_engine/`
 
+* **`sw_engine/compat.py`**:
+  * Tabla oficial de versiones (`SOLIDWORKS 2017 = v25` hasta `SOLIDWORKS 2026 = v34`, fórmula `major = year - 1992`), descubrimiento en `HKEY_CLASSES_ROOT\SldWorks.Application.*`, detección en tiempo de ejecución (`RevisionNumber`, `GetCurrentLanguage`, `GetExecutablePath`), diagnóstico UAC y carga dinámica en solo lectura de `swconst.tlb`.
+* **`sw_engine/versions/`** (adaptadores separados uno por año):
+  * `base.py`: `SolidWorksVersionAdapter` con todas las llamadas COM verificadas (`FeatureExtrusion3/2`, `FeatureCut4/3`, `FeatureRevolve2`, `CreateDefinition` + `FeatureCircularPattern5/4`, `FeatureLinearPattern5/4/3`, `FeatureFillet3`/`FeatureFillet`, `InsertFeatureChamfer`/`FeatureChamfer`, `InsertFeatureShell`, `InsertWrapFeature2`/`InsertWrapFeature`).
+  * `sw_2017.py` .. `sw_2026.py`: un archivo independiente por versión con su `YEAR`, `MAJOR`, `PROG_ID`, `TEMPLATE_SUBDIR` y tuplas explícitas de comandos prioritarios/respaldos (ej. `sw_2018.py` sin `FeatureLinearPattern5` ni `ISimpleFilletFeatureData2.Initialize`, `sw_2019.py` agregando `FeatureLinearPattern5`, `sw_2020.py`..`sw_2026.py` priorizando `CreateDefinition + CreateFeature`).
+  * `__init__.py`: registro estático `VERSION_ADAPTERS` (compatible con PyInstaller sin hidden-imports) y selector `get_version_adapter()`.
+* **`sw_engine/compat.py`**:
+  * Tabla oficial de versiones (`SOLIDWORKS 2017 = v25` hasta `SOLIDWORKS 2026 = v34`, fórmula `major = year - 1992`), descubrimiento en `HKEY_CLASSES_ROOT\SldWorks.Application.*`, detección en tiempo de ejecución (`RevisionNumber`, `GetCurrentLanguage`, `GetExecutablePath`), diagnóstico UAC y carga dinámica en solo lectura de `swconst.tlb`.
+* **`sw_engine/versions/`** (adaptadores separados uno por año):
+  * `base.py`: `SolidWorksVersionAdapter` con todas las llamadas COM verificadas (`FeatureExtrusion3/2`, `FeatureCut4/3`, `FeatureRevolve2`, `CreateDefinition` + `FeatureCircularPattern5/4`, `FeatureLinearPattern5/4/3`, `FeatureFillet3`/`FeatureFillet`, `InsertFeatureChamfer`/`FeatureChamfer`, `InsertFeatureShell`, `InsertWrapFeature2`/`InsertWrapFeature`).
+  * `sw_2017.py` .. `sw_2026.py`: un archivo independiente por versión con su `YEAR`, `MAJOR`, `PROG_ID`, `TEMPLATE_SUBDIR` y tuplas explícitas de comandos prioritarios/respaldos (ej. `sw_2018.py` sin `FeatureLinearPattern5` ni `ISimpleFilletFeatureData2.Initialize`, `sw_2019.py` agregando `FeatureLinearPattern5`, `sw_2020.py`..`sw_2026.py` priorizando `CreateDefinition + CreateFeature`).
+  * `__init__.py`: registro estático `VERSION_ADAPTERS` (compatible con PyInstaller sin hidden-imports) y selector `get_version_adapter()`.
 * **`sw_engine/connection.py`**:
-  * Conexión COM (`connect_to_solidworks`).
-  * Creación de documento de pieza verificando plantilla `.prtdot` en disco (`create_new_part`, `resolve_valid_part_template`).
+  * Conexión COM multi-versión (`connect_to_solidworks` con `GetActiveObject` → `Dispatch` y ProgIDs descubiertos en registro).
+  * Creación de documento de pieza verificando plantilla `.prtdot` en disco dinámicamente en `%PROGRAMDATA%\SOLIDWORKS\SOLIDWORKS *\templates` y `<GetExecutablePath>\lang\...` sin rutas hardcodeadas (`create_new_part`, `resolve_valid_part_template`).
   * Conversión de unidades (`mm_to_m`).
   * Invocación segura de métodos de 0 argumentos (`com_call_0`).
-  * Selección segura de entidades (`select_by_id`), selección directa de geometría `IFace2`/`IEdge` mediante `SelectionManager.AddSelectionListObject` + `CreateSelectData` (`select_entity`), planos multilenguaje (`select_reference_plane`) y creación de planos paralelos desfasados (`select_or_create_plane` con `InsertRefPlane`).
+  * Selección segura de entidades (`select_by_id`), selección directa de geometría `IFace2`/`IEdge` mediante `SelectionManager.AddSelectionListObject` + `CreateSelectData` (`select_entity`), planos multilenguaje ES/EN/PT/DE/FR/IT + fallback por índice `RefPlane` (`select_reference_plane`) y creación de planos paralelos desfasados (`select_or_create_plane` con `InsertRefPlane`).
   * Creación de ejes de referencia en la intersección de planos ortogonales (`create_reference_axis` con `InsertAxis2`) e identificación de la última operación 3D sólida (`get_last_solid_feature_name`).
-  * Control de preferencias de interfaz (`set_input_dim_on_create`).
+  * Lectura y restauración exacta de preferencias de interfaz (`get_sketch_ui_preferences`, `set_input_dim_on_create`, `restore_sketch_ui_preferences`).
 * **`sw_engine/primitives.py`**:
   * Traducción de 8 figuras 2D Pydantic (`CenterRectangle`, `CornerRectangle`, `Circle`, `Line`, `Polygon`, `Arc`, `Slot`, `AnnularSector`) y línea constructiva (`AxisLine`) a llamadas de `ISketchManager` (`draw_shape`). `AnnularSector` calcula los vértices en precisión `float64` mediante `math.cos`/`math.sin` para evitar discrepancias geométricas con `revolve_cut`.
   * Ciclo de vida completo de un croquis (`build_sketch_on_plane`): seleccionar o crear plano desfasado -> `InsertSketch(True)` -> `AddToDB = True` -> dibujar primitivas y `CreateCenterLine` -> `AddToDB = False` -> `SetPickMode` -> `ClearSelection2(True)` -> `InsertSketch(True)` -> seleccionar croquis recién creado (`get_last_sketch_name`).

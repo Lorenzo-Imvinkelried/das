@@ -177,6 +177,21 @@ Este documento registra cada problema real encontrado durante la construcción y
   2. En [`_describe_cut_failure`](file:///d:/Usuario/Desktop/sketch2solid/sw_engine/features.py#L405-L433) y [`execute_extrude_cut`](file:///d:/Usuario/Desktop/sketch2solid/sw_engine/features.py#L469-L480), ante un fallo de `FeatureCut3`, se consulta `GetPartBox(True)` para reportar los parámetros del corte y la envolvente real del sólido en el eje normal al croquis.
   3. En [`PROMPT_PARA_CHAT.txt`](file:///d:/Usuario/Desktop/sketch2solid/PROMPT_PARA_CHAT.txt) y [`ai/system_prompt.md`](file:///d:/Usuario/Desktop/sketch2solid/ai/system_prompt.md), se agregó la regla explícita de usar `"through_all": true` (o `"plane_offset_mm"` en la cara exterior `±ancho/2`) al perforar paredes de cajas huecas desde un plano central.
 
+---
+
+## Incidente #15: Portabilidad Multi-Versión SOLIDWORKS 2017–2026 y Preparación para Instalador Windows
+* **Síntoma Preventivo Detectado al Planificar un Instalador:**
+  1. `resolve_valid_part_template` tenía rutas de respaldo hardcodeadas a `C:\ProgramData\SOLIDWORKS\SOLIDWORKS 2018\templates` y `D:\SW\SOLIDWORKS\lang\english\Tutorial`, lo que fallaría en otras versiones (2017, 2019–2026) o discos.
+  2. Varias operaciones usaban únicamente firmas antiguas (`FeatureExtrusion2`, `FeatureCut3`, `FeatureCircularPattern4`, `FeatureLinearPattern3`, `IModelDoc2.FeatureFillet`, `IModelDoc2.FeatureChamfer`) y constantes fijas de 2018.
+  3. En `main.py`, escribir `pieza.json`/`ultimo_log.txt` en `BASE_DIR` y ejecutar `importlib.reload()` al validar rompería en ejecutables congelados (PyInstaller/Nuitka) instalados en `C:\Program Files\...`.
+  4. En `build_part`, el bloque `finally` restauraba `swInputDimValOnCreate` siempre a `True` (`True if prev_dim_toggle else True`) y `ShowNamedView2("*Isometric", 7)` podía depender del idioma de la vista.
+* **Solución Aplicada:**
+  1. Se creó [`sw_engine/compat.py`](file:///d:/Usuario/Desktop/Proyectos/sketch2solid/sw_engine/compat.py) con detección automática de versión/idioma/ruta (`ISldWorks::RevisionNumber`, `GetCurrentLanguage`, `GetExecutablePath`), descubrimiento de versiones en registro `HKCR\SldWorks.Application.*`, carga dinámica en solo lectura del `swconst.tlb` instalado y enrutamiento multi-versión con fallback automático (`FeatureExtrusion3/2`, `FeatureCut4/3`, `CreateDefinition` + `FeatureCircularPattern5/4`, `CreateDefinition` + `FeatureLinearPattern5/4/3`, `FeatureFillet3`/`CreateDefinition`/`FeatureFillet`, `InsertFeatureChamfer`/`FeatureChamfer`, `InsertWrapFeature2`/`InsertWrapFeature`).
+  2. En [`sw_engine/connection.py`](file:///d:/Usuario/Desktop/Proyectos/sketch2solid/sw_engine/connection.py), se reemplazaron las rutas hardcodeadas por descubrimiento dinámico en `%PROGRAMDATA%\SOLIDWORKS\SOLIDWORKS *\templates` y `<GetExecutablePath>\lang\...`, se amplió `PLANE_NAMES_MAP` a 6 idiomas (más fallback por `RefPlane`), se agregó diagnóstico claro de permisos UAC y restauración independiente de `swInputDimValOnCreate` y `swSketchInference`.
+  3. En [`main.py`](file:///d:/Usuario/Desktop/Proyectos/sketch2solid/main.py), se separaron `RESOURCE_DIR` (`sys._MEIPASS`) y `USER_DATA_DIR` (`%LOCALAPPDATA%\Sketch2Solid` en modo `sys.frozen`), se desactivó `importlib.reload()` en modo empaquetado y se agregó el botón `"Detectar SOLIDWORKS"` con telemetría de versión real.
+  4. Se agregó la suite de pruebas automatizadas [`test_compat.py`](file:///d:/Usuario/Desktop/Proyectos/sketch2solid/test_compat.py) cubriendo versiones 2017–2026+, `swconst.tlb` real, todos los fallbacks COM y modo `frozen`.
+
+
 
 
 

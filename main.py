@@ -2,6 +2,7 @@ import argparse
 import gc
 import importlib
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -13,16 +14,93 @@ from typing import Any
 import schemas
 import schemas.cad_schema
 import sw_engine
+import sw_engine.compat
+import sw_engine.versions
+import sw_engine.versions.base
 import sw_engine.connection
 import sw_engine.primitives
 import sw_engine.features
-from schemas.cad_schema import CADPart
-from sw_engine import build_part, com_call_0
+from sw_engine import (
+    SUPPORTED_SW_MAX_YEAR,
+    SUPPORTED_SW_MIN_YEAR,
+    com_call_0,
+    connect_to_solidworks,
+    get_connected_adapter,
+    get_connected_constants,
+    get_connected_version_info,
+    list_installed_solidworks_versions,
+)
 
-BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_JSON_PATH = BASE_DIR / "pieza.json"
-PROMPT_FILE_PATH = BASE_DIR / "PROMPT_PARA_CHAT.txt"
-LAST_LOG_PATH = BASE_DIR / "ultimo_log.txt"
+APP_NAME = "Sketch2Solid"
+IS_FROZEN = bool(getattr(sys, "frozen", False))
+
+
+def get_resource_dir() -> Path:
+    """Devuelve la carpeta de recursos de solo lectura (compatible con desarrollo y PyInstaller/Nuitka)."""
+    if IS_FROZEN:
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            return Path(meipass)
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def _is_dir_writable(directory: Path) -> bool:
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        probe = directory / ".sketch2solid_write_probe"
+        probe.write_text("", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return True
+    except Exception:
+        return False
+
+
+def get_user_data_dir() -> Path:
+    """
+    Devuelve la carpeta escribible para pieza.json y ultimo_log.txt.
+    - En ejecutables empaquetados (ej. instalados en C:\\Program Files\\Sketch2Solid):
+      usa %LOCALAPPDATA%\\Sketch2Solid para evitar PermissionError.
+    - En modo desarrollo desde código fuente: usa la carpeta del repositorio si es escribible.
+    """
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    fallback_dir = (
+        Path(local_app_data) / APP_NAME
+        if local_app_data
+        else (Path.home() / "AppData" / "Local" / APP_NAME)
+    )
+    if IS_FROZEN:
+        fallback_dir.mkdir(parents=True, exist_ok=True)
+        return fallback_dir
+
+    source_dir = Path(__file__).resolve().parent
+    if _is_dir_writable(source_dir):
+        return source_dir
+
+    fallback_dir.mkdir(parents=True, exist_ok=True)
+    return fallback_dir
+
+
+def resolve_prompt_path() -> Path:
+    """Localiza PROMPT_PARA_CHAT.txt tanto en código fuente como dentro de un instalador congelado."""
+    candidates = [
+        RESOURCE_DIR / "PROMPT_PARA_CHAT.txt",
+        Path(sys.executable).resolve().parent / "PROMPT_PARA_CHAT.txt",
+        USER_DATA_DIR / "PROMPT_PARA_CHAT.txt",
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    return candidates[0]
+
+
+RESOURCE_DIR = get_resource_dir()
+USER_DATA_DIR = get_user_data_dir()
+BASE_DIR = RESOURCE_DIR
+DEFAULT_JSON_PATH = USER_DATA_DIR / "pieza.json"
+BUNDLED_SAMPLE_JSON_PATH = RESOURCE_DIR / "pieza.json"
+PROMPT_FILE_PATH = resolve_prompt_path()
+LAST_LOG_PATH = USER_DATA_DIR / "ultimo_log.txt"
 
 
 class _GuiLogStream:
@@ -58,9 +136,21 @@ class _GuiLogStream:
 
 
 def reload_engine_modules() -> None:
-    """Recarga en caliente los módulos del esquema y motor COM desde disco."""
+    """
+    Recarga en caliente los módulos del esquema y motor COM desde disco en modo desarrollo.
+    En modo ejecutable empaquetado (PyInstaller/Nuitka, sys.frozen=True) se omite de forma segura.
+    """
+    if IS_FROZEN:
+        return
     importlib.reload(schemas.cad_schema)
     importlib.reload(schemas)
+    importlib.reload(sw_engine.compat)
+    importlib.reload(sw_engine.versions.base)
+    for year in range(2017, 2027):
+        mod_name = f"sw_engine.versions.sw_{year}"
+        if mod_name in sys.modules:
+            importlib.reload(sys.modules[mod_name])
+    importlib.reload(sw_engine.versions)
     importlib.reload(sw_engine.connection)
     importlib.reload(sw_engine.primitives)
     importlib.reload(sw_engine.features)
@@ -99,7 +189,7 @@ def parse_and_validate_part(raw_text: str) -> Any:
 
 
 def run_from_file(json_path: Path) -> None:
-    """Modo consola: lee un archivo JSON, lo valida y construye la pieza en SolidWorks 2018."""
+    """Modo consola: lee un archivo JSON, lo valida y construye la pieza en SOLIDWORKS (2017–2026)."""
     if not json_path.exists():
         raise FileNotFoundError(f"No se encontró el archivo JSON: {json_path}")
 
@@ -107,24 +197,28 @@ def run_from_file(json_path: Path) -> None:
     part = parse_and_validate_part(raw_text)
     print(f"[OK] Pieza validada: '{part.part_name}' ({len(part.operations)} operaciones)")
     model = sw_engine.features.build_part(part)
+    ver_label = sw_engine.connection.get_connected_version_info().display_name
     try:
         doc_title = str(com_call_0(model, "GetTitle"))
     except Exception:
         doc_title = part.part_name
-    print(f"[OK] Pieza construida en SolidWorks 2018 (Documento: '{doc_title}').")
+    print(f"[OK] Pieza construida en {ver_label} (Documento: '{doc_title}').")
 
 
 class Sketch2SolidApp:
-    """Interfaz gráfica local para pegar el JSON devuelto por cualquier IA y construirlo en SolidWorks 2018."""
+    """Interfaz gráfica local para pegar el JSON devuelto por cualquier IA y construirlo en SOLIDWORKS (2017–2026)."""
 
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Sketch2Solid - Constructor 3D para SolidWorks 2018")
-        self.root.geometry("860x680")
-        self.root.minsize(720, 540)
+        self.root.title(
+            f"Sketch2Solid - Constructor 3D para SOLIDWORKS ({SUPPORTED_SW_MIN_YEAR}–{SUPPORTED_SW_MAX_YEAR})"
+        )
+        self.root.geometry("900x700")
+        self.root.minsize(760, 560)
 
         self._build_ui()
         self.load_json_file(silent=True)
+        self._log_installed_versions_summary()
 
     def _build_ui(self) -> None:
         # Encabezado con instrucciones rápidas
@@ -133,7 +227,7 @@ class Sketch2SolidApp:
 
         title_lbl = tk.Label(
             header_frame,
-            text="Sketch2Solid (Modo Chat sin API -> SolidWorks 2018)",
+            text=f"Sketch2Solid (Modo Chat sin API -> SOLIDWORKS {SUPPORTED_SW_MIN_YEAR}–{SUPPORTED_SW_MAX_YEAR})",
             font=("Segoe UI", 12, "bold"),
             anchor="w",
         )
@@ -144,7 +238,7 @@ class Sketch2SolidApp:
             text=(
                 "Paso 1: Copia el Prompt Maestro y envíalo junto con la foto de tu croquis a cualquier IA (ChatGPT, Gemini, Claude).\n"
                 "Paso 2: Copia el JSON que te responda la IA y pégalo aquí.\n"
-                "Paso 3: Con SolidWorks 2018 abierto, presiona '3. Construir en SolidWorks 2018'."
+                "Paso 3: Con SOLIDWORKS abierto (Windows, 2017–2026), presiona '3. Construir en SOLIDWORKS'."
             ),
             font=("Segoe UI", 9),
             justify="left",
@@ -193,7 +287,7 @@ class Sketch2SolidApp:
 
         btn_build = tk.Button(
             btn_frame,
-            text="3. Construir en SolidWorks 2018",
+            text="3. Construir en SOLIDWORKS",
             command=self.build_in_solidworks,
             bg="#1e8e3e",
             fg="white",
@@ -201,7 +295,17 @@ class Sketch2SolidApp:
             padx=14,
             pady=5,
         )
-        btn_build.pack(side=tk.LEFT, padx=(6, 0))
+        btn_build.pack(side=tk.LEFT, padx=(6, 6))
+
+        btn_detect = tk.Button(
+            btn_frame,
+            text="Detectar SOLIDWORKS",
+            command=self.detect_solidworks_connection,
+            font=("Segoe UI", 9),
+            padx=8,
+            pady=5,
+        )
+        btn_detect.pack(side=tk.RIGHT)
 
         # Botones secundarios de archivo (pieza.json)
         file_frame = tk.Frame(self.root, padx=12, pady=2)
@@ -209,7 +313,7 @@ class Sketch2SolidApp:
 
         tk.Label(
             file_frame,
-            text=f"Archivo activo: {DEFAULT_JSON_PATH.name}",
+            text=f"Archivo activo: {DEFAULT_JSON_PATH}",
             font=("Segoe UI", 8),
             fg="#555555",
         ).pack(side=tk.LEFT)
@@ -257,12 +361,50 @@ class Sketch2SolidApp:
         )
         self.log_text.pack(fill=tk.X)
 
+    def _log_installed_versions_summary(self) -> None:
+        versions = list_installed_solidworks_versions()
+        if versions:
+            ver_text = ", ".join(f"SOLIDWORKS {year} (v{major})" for year, major, _ in versions)
+            self.log(f"[INFO] SOLIDWORKS detectado en registro de Windows: {ver_text}")
+        else:
+            self.log(
+                "[AVISO] No se detectaron claves SldWorks.Application.<N> en el registro. "
+                "Asegúrate de tener SOLIDWORKS (2017–2026) instalado en Windows."
+            )
+
+    def detect_solidworks_connection(self) -> None:
+        try:
+            sw_app = connect_to_solidworks()
+            ver = get_connected_version_info()
+            adapter = get_connected_adapter()
+            consts = get_connected_constants()
+            del sw_app
+            gc.collect()
+            lang = ver.language or "desconocido"
+            msg = (
+                f"Conexión exitosa con {ver.display_name}\n"
+                f"- Adaptador activo: {adapter.name} ({adapter.__class__.__module__})\n"
+                f"- ProgID: {ver.prog_id}\n"
+                f"- Idioma: {lang}\n"
+                f"- Carpeta ejecutable: {ver.executable_dir or '(no informada)'}\n"
+                f"- Constantes COM: {consts.source}"
+            )
+            self.log(
+                f"[OK] {ver.display_name} conectado -> {adapter.name} "
+                f"(idioma: {lang}, constantes: {consts.source})."
+            )
+            messagebox.showinfo("SOLIDWORKS Detectado", msg)
+        except Exception as exc:
+            self.log(f"[ERROR de conexión] {exc}")
+            messagebox.showerror("No se pudo conectar a SOLIDWORKS", str(exc))
+
     def log(self, message: str) -> None:
         self.log_text.configure(state=tk.NORMAL)
         self.log_text.insert(tk.END, message + "\n")
         self.log_text.see(tk.END)
         self.log_text.configure(state=tk.DISABLED)
         try:
+            LAST_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
             with LAST_LOG_PATH.open("a", encoding="utf-8") as fh:
                 fh.write(message + "\n")
         except Exception:
@@ -270,14 +412,15 @@ class Sketch2SolidApp:
         self.root.update_idletasks()
 
     def copy_master_prompt(self) -> None:
-        if not PROMPT_FILE_PATH.exists():
+        prompt_path = resolve_prompt_path()
+        if not prompt_path.exists():
             messagebox.showerror(
                 "Archivo no encontrado",
-                f"No se encontró el archivo de prompt en:\n{PROMPT_FILE_PATH}",
+                f"No se encontró el archivo de prompt en:\n{prompt_path}",
             )
             return
 
-        prompt_content = PROMPT_FILE_PATH.read_text(encoding="utf-8")
+        prompt_content = prompt_path.read_text(encoding="utf-8")
         self.root.clipboard_clear()
         self.root.clipboard_append(prompt_content)
         self.root.update()
@@ -302,26 +445,30 @@ class Sketch2SolidApp:
         self.log("[INFO] JSON pegado desde el portapapeles y limpiado automáticamente.")
 
     def load_json_file(self, silent: bool = False) -> None:
-        if not DEFAULT_JSON_PATH.exists():
+        source_path = DEFAULT_JSON_PATH
+        if not source_path.exists() and BUNDLED_SAMPLE_JSON_PATH.exists():
+            source_path = BUNDLED_SAMPLE_JSON_PATH
+        if not source_path.exists():
             if not silent:
                 messagebox.showwarning("Aviso", f"No existe todavía {DEFAULT_JSON_PATH}")
             return
 
-        content = DEFAULT_JSON_PATH.read_text(encoding="utf-8")
+        content = source_path.read_text(encoding="utf-8")
         self.json_editor.delete("1.0", tk.END)
         self.json_editor.insert("1.0", content)
         if not silent:
-            self.log(f"[INFO] Archivo recargado desde {DEFAULT_JSON_PATH.name}.")
+            self.log(f"[INFO] Archivo recargado desde {source_path.name}.")
 
     def save_json_file(self) -> bool:
         raw_text = self.json_editor.get("1.0", tk.END)
         try:
             part = parse_and_validate_part(raw_text)
             formatted = json.dumps(part.model_dump(), indent=2, ensure_ascii=False)
+            DEFAULT_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
             DEFAULT_JSON_PATH.write_text(formatted + "\n", encoding="utf-8")
             self.json_editor.delete("1.0", tk.END)
             self.json_editor.insert("1.0", formatted)
-            self.log(f"[OK] JSON validado y guardado en {DEFAULT_JSON_PATH.name}.")
+            self.log(f"[OK] JSON validado y guardado en {DEFAULT_JSON_PATH}.")
             return True
         except Exception as exc:
             self.log(f"[ERROR de validación] {exc}")
@@ -357,6 +504,7 @@ class Sketch2SolidApp:
         old_stdout = sys.stdout
         try:
             try:
+                LAST_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
                 LAST_LOG_PATH.write_text("", encoding="utf-8")
             except Exception:
                 pass
@@ -364,30 +512,32 @@ class Sketch2SolidApp:
             self.log("Validando JSON con Pydantic...")
             part = parse_and_validate_part(raw_text)
             formatted = json.dumps(part.model_dump(), indent=2, ensure_ascii=False)
+            DEFAULT_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
             DEFAULT_JSON_PATH.write_text(formatted + "\n", encoding="utf-8")
             self.json_editor.delete("1.0", tk.END)
             self.json_editor.insert("1.0", formatted)
 
             self.log(
-                f"Conectando a SolidWorks 2018 y construyendo '{part.part_name}' "
+                f"Conectando a SOLIDWORKS y construyendo '{part.part_name}' "
                 f"({len(part.operations)} operaciones)..."
             )
             model = sw_engine.features.build_part(part)
+            ver_label = sw_engine.connection.get_connected_version_info().display_name
             try:
                 doc_title = str(com_call_0(model, "GetTitle"))
             except Exception:
                 doc_title = part.part_name
 
-            # Liberar referencias COM inmediatamente para que SolidWorks pueda editarse sin bloqueos
+            # Liberar referencias COM inmediatamente para que SOLIDWORKS pueda editarse sin bloqueos
             del model
             gc.collect()
 
-            self.log(f"[OK] ¡Pieza '{part.part_name}' creada exitosamente en SolidWorks 2018 (Documento: {doc_title})!")
+            self.log(f"[OK] ¡Pieza '{part.part_name}' creada exitosamente en {ver_label} (Documento: {doc_title})!")
         except Exception as exc:
             tb_str = traceback.format_exc()
             self.log(f"[ERROR] {exc}\n{tb_str}")
             messagebox.showerror(
-                "Error al construir en SolidWorks",
+                "Error al construir en SOLIDWORKS",
                 f"Ocurrió un error durante la construcción:\n\n{exc}",
             )
         finally:
@@ -400,7 +550,7 @@ class Sketch2SolidApp:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Sketch2Solid - Ejecutor de piezas JSON en SolidWorks 2018"
+        description=f"Sketch2Solid - Ejecutor de piezas JSON en SOLIDWORKS ({SUPPORTED_SW_MIN_YEAR}–{SUPPORTED_SW_MAX_YEAR})"
     )
     parser.add_argument(
         "--file",
@@ -421,4 +571,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

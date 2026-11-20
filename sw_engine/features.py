@@ -25,37 +25,49 @@ from schemas.cad_schema import (
     Slot,
     WrapOperation,
 )
+from .compat import (
+    call_chamfer,
+    call_circular_pattern,
+    call_extrude_boss,
+    call_extrude_cut,
+    call_fillet,
+    call_linear_pattern,
+    call_revolve,
+    call_shell,
+    call_wrap,
+)
 from .connection import (
     com_call_0,
     connect_to_solidworks,
     create_new_part,
     create_reference_axis,
+    get_connected_adapter,
+    get_connected_constants,
+    get_connected_version_info,
     get_last_solid_feature_name,
+    get_sketch_ui_preferences,
     mm_to_m,
+    restore_sketch_ui_preferences,
     select_by_id,
     select_entity,
     set_input_dim_on_create,
 )
 from .primitives import build_sketch_on_plane
 
-# Constantes de condición final de extrusión (swEndConditions_e)
+# Constantes por defecto (respaldos verificados; en ejecución se resuelven desde swconst.tlb)
 SW_END_COND_BLIND = 0              # Hasta profundidad especificada
 SW_END_COND_THROUGH_ALL = 1        # Por todo (una dirección)
 SW_END_COND_MID_PLANE = 6          # Plano medio
 SW_END_COND_THROUGH_ALL_BOTH = 9   # Por todo - Ambos lados
 
-# Constantes de operación Wrap en SolidWorks 2018 (verificadas en swconst.tlb)
 SW_WRAP_TYPE_EMBOSS = 0            # swWrapSketchType_Emboss (saliente/relieve)
 SW_WRAP_TYPE_ENGRAVE = 1           # swWrapSketchType_Engrave (deboss/grabado/corte)
 SW_WRAP_TYPE_SCRIBE = 2            # swWrapSketchType_Scribe (línea de partición)
 SW_WRAP_METHOD_ANALYTICAL = 0      # swWrapMethods_Analytical (cilindros y conos analíticos)
 SW_WRAP_METHOD_SPLINE_SURFACE = 1  # swWrapMethods_SplineSurface (fallback multi-cara/complejo)
 
-# Opción de borrado en IModelDocExtension.DeleteSelection2 (swDeleteSelectionOptions_e)
 SW_DELETE_CHILDREN = 1             # swDelete_Children
-
-# Vista estándar Isométrica (swStandardViews_e.swIsometricView)
-SW_VIEW_ISOMETRIC = 7
+SW_VIEW_ISOMETRIC = 7              # swStandardViews_e.swIsometricView
 
 
 def _call_feature_extrusion2(
@@ -67,31 +79,16 @@ def _call_feature_extrusion2(
     depth_2_m: float = 0.0,
     reverse_dir: bool = False,
 ) -> Any:
-    """Invoca FeatureExtrusion2 con los 23 parámetros exactos de SolidWorks 2018."""
-    return feat_mgr.FeatureExtrusion2(
-        bool(sd),           # 1. Sd: True = una condición final (incluye MidPlane), False = dos direcciones independientes
-        False,              # 2. Flip: invertir lado a cortar
-        bool(reverse_dir),  # 3. Dir: invertir dirección de extrusión
-        int(end_cond_1),    # 4. T1: condición final dirección 1
-        int(end_cond_2),   # 5. T2: condición final dirección 2
-        float(depth_1_m),  # 6. D1: profundidad dirección 1 (metros)
-        float(depth_2_m),  # 7. D2: profundidad dirección 2 (metros)
-        False,             # 8. Dchk1: ángulo de salida dir 1
-        False,             # 9. Dchk2: ángulo de salida dir 2
-        False,             # 10. Ddir1: ángulo de salida hacia adentro dir 1
-        False,             # 11. Ddir2: ángulo de salida hacia adentro dir 2
-        0.0,               # 12. Dang1: ángulo de salida 1 (radianes)
-        0.0,               # 13. Dang2: ángulo de salida 2 (radianes)
-        False,             # 14. OffsetReverse1
-        False,             # 15. OffsetReverse2
-        False,             # 16. TranslateSurface1
-        False,             # 17. TranslateSurface2
-        True,              # 18. Merge: fusionar resultado
-        False,             # 19. UseFeatScope: afectar a todos los sólidos
-        True,              # 20. UseAutoSelect: selección automática de sólidos
-        0,                 # 21. T0: condición inicial (0 = swStartSketchPlane)
-        0.0,               # 22. StartOffset (metros)
-        False,             # 23. FlipStartOffset
+    """Invoca extrusión de saliente multi-versión (FeatureExtrusion3 -> fallback FeatureExtrusion2)."""
+    return call_extrude_boss(
+        feat_mgr=feat_mgr,
+        version_info=get_connected_version_info(),
+        sd=sd,
+        end_cond_1=end_cond_1,
+        end_cond_2=end_cond_2,
+        depth_1_m=depth_1_m,
+        depth_2_m=depth_2_m,
+        reverse_dir=reverse_dir,
     )
 
 
@@ -102,16 +99,19 @@ def _extrude_single_sketch_boss(
     use_midplane: bool,
 ) -> Any:
     """Intenta extruir un croquis ya cerrado y seleccionado (con fallback en plano medio y ciego)."""
+    consts = get_connected_constants()
     feat_mgr = model.FeatureManager
-    end_cond_1 = SW_END_COND_MID_PLANE if use_midplane else SW_END_COND_BLIND
+    end_cond_blind = int(consts.swEndCondBlind)
+    end_cond_mid = int(consts.swEndCondMidPlane)
+    end_cond_1 = end_cond_mid if use_midplane else end_cond_blind
 
-    # IMPORTANTE: En SolidWorks 2018, swEndCondMidPlane (6) requiere Sd=True.
-    # Si se pasa Sd=False con D2=0.0, SolidWorks interpreta Dirección 2 con espesor 0 y falla.
+    # IMPORTANTE: swEndCondMidPlane requiere Sd=True.
+    # Si se pasa Sd=False con D2=0.0, SOLIDWORKS interpreta Dirección 2 con espesor 0 y falla.
     feat = _call_feature_extrusion2(
         feat_mgr=feat_mgr,
         sd=True,
         end_cond_1=end_cond_1,
-        end_cond_2=SW_END_COND_BLIND,
+        end_cond_2=end_cond_blind,
         depth_1_m=depth_m,
         depth_2_m=0.0,
     )
@@ -121,8 +121,8 @@ def _extrude_single_sketch_boss(
         feat = _call_feature_extrusion2(
             feat_mgr=feat_mgr,
             sd=False,
-            end_cond_1=SW_END_COND_BLIND,
-            end_cond_2=SW_END_COND_BLIND,
+            end_cond_1=end_cond_blind,
+            end_cond_2=end_cond_blind,
             depth_1_m=depth_m / 2.0,
             depth_2_m=depth_m / 2.0,
         )
@@ -134,8 +134,8 @@ def _extrude_single_sketch_boss(
         feat = _call_feature_extrusion2(
             feat_mgr=feat_mgr,
             sd=True,
-            end_cond_1=SW_END_COND_BLIND,
-            end_cond_2=SW_END_COND_BLIND,
+            end_cond_1=end_cond_blind,
+            end_cond_2=end_cond_blind,
             depth_1_m=depth_m,
             depth_2_m=0.0,
             reverse_dir=True,
@@ -146,8 +146,8 @@ def _extrude_single_sketch_boss(
         feat = _call_feature_extrusion2(
             feat_mgr=feat_mgr,
             sd=True,
-            end_cond_1=SW_END_COND_MID_PLANE,
-            end_cond_2=SW_END_COND_BLIND,
+            end_cond_1=end_cond_mid,
+            end_cond_2=end_cond_blind,
             depth_1_m=depth_m,
             depth_2_m=0.0,
         )
@@ -159,10 +159,11 @@ def _delete_sketch_silently(model: Any, sketch_name: str) -> None:
     """Elimina un croquis fallido del árbol para no dejar geometría huérfana."""
     if not sketch_name:
         return
+    consts = get_connected_constants()
     try:
         model.ClearSelection2(True)
         if select_by_id(model, sketch_name, "SKETCH", 0.0, 0.0, 0.0, append=False, mark=0):
-            model.Extension.DeleteSelection2(SW_DELETE_CHILDREN)
+            model.Extension.DeleteSelection2(int(consts.swDelete_Children))
         model.ClearSelection2(True)
     except Exception:
         pass
@@ -190,8 +191,8 @@ def _are_concentric_shapes(sketch: Sketch) -> bool:
 
 def execute_extrude_boss(model: Any, op: ExtrudeBossOperation) -> Any:
     """
-    Ejecuta una operación de extrusión de saliente/base (FeatureExtrusion2)
-    con los 23 parámetros exactos requeridos por SolidWorks 2018.
+    Ejecuta una operación de extrusión de saliente/base (FeatureExtrusion3 con fallback a
+    FeatureExtrusion2, compatible con SOLIDWORKS 2017–2026+).
     - Soporta planos desfasados (plane_offset_mm) y extrusión simétrica (midplane / both_directions).
     - Si la IA agrupa varias figuras cerradas no concéntricas en el mismo croquis de saliente
       (ej. cilindro + brazo + orejas de brida), las extruye directamente una por una con
@@ -268,34 +269,16 @@ def _call_feature_cut3(
     depth_1_m: float,
     depth_2_m: float = 0.0,
 ) -> Any:
-    """Invoca FeatureCut3 con los 26 parámetros exactos de SolidWorks 2018."""
-    return feat_mgr.FeatureCut3(
-        bool(sd),            # 1. Sd: True = una dirección, False = dos direcciones
-        False,               # 2. Flip: invertir lado a cortar
-        bool(reverse_dir),   # 3. Dir: invertir dirección del corte
-        int(end_cond_1),     # 4. T1: condición final dirección 1
-        int(end_cond_2),     # 5. T2: condición final dirección 2
-        float(depth_1_m),    # 6. D1: profundidad dirección 1 (metros)
-        float(depth_2_m),    # 7. D2: profundidad dirección 2 (metros)
-        False,               # 8. Dchk1
-        False,               # 9. Dchk2
-        False,               # 10. Ddir1
-        False,               # 11. Ddir2
-        0.0,                 # 12. Dang1
-        0.0,                 # 13. Dang2
-        False,               # 14. OffsetReverse1
-        False,               # 15. OffsetReverse2
-        False,               # 16. TranslateSurface1
-        False,               # 17. TranslateSurface2
-        False,               # 18. NormalCut (corte normal de chapa metálica)
-        False,               # 19. UseFeatScope
-        True,                # 20. UseAutoSelect
-        False,               # 21. AssemblyFeatureScope
-        False,               # 22. AutoSelectComponents
-        False,               # 23. PropagateFeatureToParts
-        0,                   # 24. T0 (0 = swStartSketchPlane)
-        0.0,                 # 25. StartOffset (metros)
-        False,               # 26. FlipStartOffset
+    """Invoca corte extruido multi-versión (FeatureCut4 en SW 2017–2026+ -> fallback FeatureCut3)."""
+    return call_extrude_cut(
+        feat_mgr=feat_mgr,
+        version_info=get_connected_version_info(),
+        sd=sd,
+        reverse_dir=reverse_dir,
+        end_cond_1=end_cond_1,
+        end_cond_2=end_cond_2,
+        depth_1_m=depth_1_m,
+        depth_2_m=depth_2_m,
     )
 
 
@@ -306,20 +289,25 @@ def _cut_single_sketch(
     end_cond_1: int,
     depth_m: float,
 ) -> Any:
-    """Ejecuta FeatureCut3 sobre un croquis cerrado probando las direcciones válidas."""
+    """Ejecuta corte extruido (FeatureCut4/FeatureCut3) sobre un croquis cerrado probando las direcciones válidas."""
+    consts = get_connected_constants()
+    end_cond_blind = int(consts.swEndCondBlind)
+    end_cond_through_all = int(consts.swEndCondThroughAll)
+    end_cond_mid = int(consts.swEndCondMidPlane)
+
     feat_mgr = model.FeatureManager
     feat = None
 
-    # 1A. Si through_all=True, usar primero Sd=False (ambas direcciones) con SW_END_COND_THROUGH_ALL.
-    #     En SolidWorks 2018, pasar Sd=True ignora la segunda dirección y corta solo la mitad del
-    #     sólido cuando el croquis reside en el plano central (midplane=True).
+    # 1A. Si through_all=True, usar primero Sd=False (ambas direcciones) con swEndCondThroughAll.
+    #     Pasar Sd=True ignora la segunda dirección y corta solo la mitad del sólido cuando
+    #     el croquis reside en el plano central (midplane=True).
     if op.through_all:
         feat = _call_feature_cut3(
             feat_mgr=feat_mgr,
             sd=False,
             reverse_dir=False,
-            end_cond_1=SW_END_COND_THROUGH_ALL,
-            end_cond_2=SW_END_COND_THROUGH_ALL,
+            end_cond_1=end_cond_through_all,
+            end_cond_2=end_cond_through_all,
             depth_1_m=depth_m,
             depth_2_m=depth_m,
         )
@@ -327,15 +315,15 @@ def _cut_single_sketch(
             select_by_id(model, sketch_name, "SKETCH", 0.0, 0.0, 0.0, append=False, mark=0)
 
     # 1B. Si through_all=False y both_directions=True, el usuario/IA indicó una profundidad total
-    #     centrada en el plano (igual que midplane=True). Usamos SW_END_COND_MID_PLANE (6) o
+    #     centrada en el plano (igual que midplane=True). Usamos swEndCondMidPlane o
     #     depth_m / 2.0 hacia cada lado para no duplicar la profundidad y partir la pieza en dos.
     if feat is None and not op.through_all and op.both_directions:
         feat = _call_feature_cut3(
             feat_mgr=feat_mgr,
             sd=True,
             reverse_dir=False,
-            end_cond_1=SW_END_COND_MID_PLANE,
-            end_cond_2=SW_END_COND_BLIND,
+            end_cond_1=end_cond_mid,
+            end_cond_2=end_cond_blind,
             depth_1_m=depth_m,
         )
         if feat is None and sketch_name:
@@ -344,8 +332,8 @@ def _cut_single_sketch(
                 feat_mgr=feat_mgr,
                 sd=False,
                 reverse_dir=False,
-                end_cond_1=SW_END_COND_BLIND,
-                end_cond_2=SW_END_COND_BLIND,
+                end_cond_1=end_cond_blind,
+                end_cond_2=end_cond_blind,
                 depth_1_m=depth_m / 2.0,
                 depth_2_m=depth_m / 2.0,
             )
@@ -355,8 +343,8 @@ def _cut_single_sketch(
                     feat_mgr=feat_mgr,
                     sd=False,
                     reverse_dir=False,
-                    end_cond_1=SW_END_COND_BLIND,
-                    end_cond_2=SW_END_COND_BLIND,
+                    end_cond_1=end_cond_blind,
+                    end_cond_2=end_cond_blind,
                     depth_1_m=depth_m,
                     depth_2_m=depth_m,
                 )
@@ -370,7 +358,7 @@ def _cut_single_sketch(
             sd=True,
             reverse_dir=True,
             end_cond_1=end_cond_1,
-            end_cond_2=SW_END_COND_BLIND,
+            end_cond_2=end_cond_blind,
             depth_1_m=depth_m,
         )
 
@@ -382,7 +370,7 @@ def _cut_single_sketch(
             sd=True,
             reverse_dir=False,
             end_cond_1=end_cond_1,
-            end_cond_2=SW_END_COND_BLIND,
+            end_cond_2=end_cond_blind,
             depth_1_m=depth_m,
         )
 
@@ -393,8 +381,8 @@ def _cut_single_sketch(
             feat_mgr=feat_mgr,
             sd=True,
             reverse_dir=False,
-            end_cond_1=SW_END_COND_MID_PLANE,
-            end_cond_2=SW_END_COND_BLIND,
+            end_cond_1=end_cond_mid,
+            end_cond_2=end_cond_blind,
             depth_1_m=depth_m,
         )
 
@@ -435,7 +423,7 @@ def _describe_cut_failure(model: Any, op: ExtrudeCutOperation) -> str:
 
 def execute_extrude_cut(model: Any, op: ExtrudeCutOperation) -> Any:
     """
-    Ejecuta una operación de corte extruido (FeatureCut3) en SolidWorks 2018.
+    Ejecuta una operación de corte extruido (FeatureCut4 en SW 2017–2026+ con fallback a FeatureCut3).
     - Soporta planos paralelos desfasados (plane_offset_mm).
     - Si both_directions=True o through_all=True, intenta primero cortar hacia ambos lados (Sd=False)
       para atravesar piezas simétricas (midplane=True) de lado a lado, con fallback a una dirección.
@@ -449,7 +437,8 @@ def execute_extrude_cut(model: Any, op: ExtrudeCutOperation) -> Any:
         plane_offset_mm=op.plane_offset_mm,
     )
 
-    end_cond_1 = SW_END_COND_THROUGH_ALL if op.through_all else SW_END_COND_BLIND
+    consts = get_connected_constants()
+    end_cond_1 = int(consts.swEndCondThroughAll) if op.through_all else int(consts.swEndCondBlind)
     depth_m = mm_to_m(op.depth_mm) if op.depth_mm is not None else 0.01
 
     feat = _cut_single_sketch(model, sketch_name, op, end_cond_1, depth_m)
@@ -489,7 +478,7 @@ def execute_revolve(
 ) -> Any:
     """
     Ejecuta una operación de revolución (saliente o corte) mediante FeatureRevolve2
-    con los 20 parámetros exactos de SolidWorks 2018.
+    (20 parámetros, compatible con SOLIDWORKS 2017–2026+).
     Dibuja automáticamente el perfil y la línea constructiva (axis_line) en el croquis.
     """
     sketch_name = build_sketch_on_plane(
@@ -501,29 +490,11 @@ def execute_revolve(
     )
 
     angle_rad = math.radians(float(op.angle_deg))
-    feat_mgr = model.FeatureManager
-
-    feat = feat_mgr.FeatureRevolve2(
-        True,              # 1. SingleDir
-        True,              # 2. IsSolid
-        False,             # 3. IsThin
-        bool(is_cut),      # 4. IsCut (False = saliente, True = corte)
-        False,             # 5. ReverseDir
-        False,             # 6. BothDirectionUpToSameEntity
-        SW_END_COND_BLIND, # 7. Dir1Type (0 = swEndCondBlind)
-        0,                 # 8. Dir2Type
-        float(angle_rad),  # 9. Dir1Angle (radianes)
-        0.0,               # 10. Dir2Angle
-        False,             # 11. OffsetReverse1
-        False,             # 12. OffsetReverse2
-        0.0,               # 13. OffsetDistance1
-        0.0,               # 14. OffsetDistance2
-        0,                 # 15. ThinType
-        0.0,               # 16. ThinThickness1
-        0.0,               # 17. ThinThickness2
-        True,              # 18. Merge
-        False,             # 19. UseFeatScope
-        True,              # 20. UseAutoSelect
+    feat = call_revolve(
+        feat_mgr=model.FeatureManager,
+        consts=get_connected_constants(),
+        is_cut=is_cut,
+        angle_rad=angle_rad,
     )
 
     if feat is None:
@@ -645,32 +616,38 @@ def execute_circular_pattern(
         f"alrededor de '{axis_name}' (eje '{op.axis}', {op.instances} instancias)..."
     )
 
-    # En FeatureCircularPattern4 de SolidWorks 2018:
+    # En matrices circulares de SOLIDWORKS:
     # - Si EqualSpacing=True, Spacing es el ángulo TOTAL en radianes (ej. 2*pi).
     # - Si EqualSpacing=False, Spacing es el paso angular entre instancias (total / instances).
     total_rad = math.radians(float(op.angle_deg))
     step_rad = total_rad / float(op.instances)
-    feat_mgr = model.FeatureManager
     target_feat_obj = _find_feature_by_name(model, target_feat_name)
+    version_info = get_connected_version_info()
+    consts = get_connected_constants()
 
-    def _try_circular_pattern(geom_pattern: bool, equal_spacing: bool, spacing_rad: float) -> Any:
+    def _prepare_circular_selection() -> tuple[bool, bool]:
         model.ClearSelection2(True)
         ok_feat = select_by_id(model, target_feat_name, "BODYFEATURE", 0.0, 0.0, 0.0, append=False, mark=4)
         if not ok_feat and target_feat_obj is not None:
             ok_feat = select_entity(model, target_feat_obj, append=False, mark=4)
         ok_axis = select_by_id(model, axis_name, "AXIS", 0.0, 0.0, 0.0, append=True, mark=1)
+        return ok_feat, ok_axis
+
+    def _try_circular_pattern(geom_pattern: bool, equal_spacing: bool, spacing_rad: float) -> Any:
+        ok_feat, ok_axis = _prepare_circular_selection()
         print(
-            f"     -> Intento FeatureCircularPattern4(geom={geom_pattern}, equal={equal_spacing}): "
+            f"     -> Intento matriz circular (geom={geom_pattern}, equal={equal_spacing}): "
             f"sel_feat={ok_feat}, sel_axis={ok_axis}"
         )
-        return feat_mgr.FeatureCircularPattern4(
-            int(op.instances),       # 1. Number
-            float(spacing_rad),      # 2. Spacing (radianes)
-            False,                   # 3. FlipDirection
-            "NULL",                  # 4. DName
-            bool(geom_pattern),      # 5. GeometryPattern
-            bool(equal_spacing),     # 6. EqualSpacing
-            False,                   # 7. VaryInstance
+        return call_circular_pattern(
+            model=model,
+            version_info=version_info,
+            consts=consts,
+            prepare_selection=_prepare_circular_selection,
+            instances=int(op.instances),
+            spacing_rad=float(spacing_rad),
+            geom_pattern=bool(geom_pattern),
+            equal_spacing=bool(equal_spacing),
         )
 
     feat = _try_circular_pattern(geom_pattern=False, equal_spacing=op.equal_spacing, spacing_rad=total_rad)
@@ -730,10 +707,11 @@ def execute_circular_pattern(
 
 def execute_linear_pattern(model: Any, op: LinearPatternOperation) -> Any:
     """
-    Ejecuta una matriz lineal (FeatureLinearPattern3) sobre la última operación 3D creada:
+    Ejecuta una matriz lineal compatible con SOLIDWORKS 2017–2026+ sobre la última operación 3D creada:
     1. Identifica la última operación 3D sólida en el árbol del FeatureManager.
     2. Crea eje(s) de referencia en X (Mark=1) y opcionalmente en Y (Mark=2).
-    3. Selecciona la operación con Mark=4 ('BODYFEATURE') y ejecuta FeatureLinearPattern3.
+    3. Selecciona la operación con Mark=4 ('BODYFEATURE') y ejecuta CreateDefinition(swFmLPattern) /
+       FeatureLinearPattern5 / FeatureLinearPattern4 / FeatureLinearPattern3 según versión.
     """
     target_feat_name, _ = get_last_solid_feature_name(model)
     axis_x_name = create_reference_axis(model, "X")
@@ -741,25 +719,27 @@ def execute_linear_pattern(model: Any, op: LinearPatternOperation) -> Any:
 
     spacing_x_m = mm_to_m(op.spacing_x_mm)
     spacing_y_m = mm_to_m(op.spacing_y_mm) if op.instances_y > 1 else 0.0
-    feat_mgr = model.FeatureManager
+    version_info = get_connected_version_info()
+    consts = get_connected_constants()
 
-    def _try_linear_pattern(geom_pattern: bool) -> Any:
+    def _prepare_linear_selection() -> None:
         model.ClearSelection2(True)
         select_by_id(model, target_feat_name, "BODYFEATURE", 0.0, 0.0, 0.0, append=False, mark=4)
         select_by_id(model, axis_x_name, "AXIS", 0.0, 0.0, 0.0, append=True, mark=1)
         if axis_y_name:
             select_by_id(model, axis_y_name, "AXIS", 0.0, 0.0, 0.0, append=True, mark=2)
-        return feat_mgr.FeatureLinearPattern3(
-            int(op.instances_x),  # 1. Num1
-            float(spacing_x_m),   # 2. Spacing1 (metros)
-            int(op.instances_y),  # 3. Num2
-            float(spacing_y_m),   # 4. Spacing2 (metros)
-            False,                # 5. FlipDir1
-            False,                # 6. FlipDir2
-            "NULL",               # 7. DName1
-            "NULL",               # 8. DName2
-            bool(geom_pattern),   # 9. GeometryPattern
-            False,                # 10. VaryInstance
+
+    def _try_linear_pattern(geom_pattern: bool) -> Any:
+        return call_linear_pattern(
+            model=model,
+            version_info=version_info,
+            consts=consts,
+            prepare_selection=_prepare_linear_selection,
+            instances_x=int(op.instances_x),
+            spacing_x_m=float(spacing_x_m),
+            instances_y=int(op.instances_y),
+            spacing_y_m=float(spacing_y_m),
+            geom_pattern=bool(geom_pattern),
         )
 
     feat = _try_linear_pattern(geom_pattern=False)
@@ -768,7 +748,7 @@ def execute_linear_pattern(model: Any, op: LinearPatternOperation) -> Any:
 
     if feat is None:
         raise RuntimeError(
-            f"Falló FeatureLinearPattern3 sobre la operación '{target_feat_name}'."
+            f"Falló la matriz lineal sobre la operación '{target_feat_name}'."
         )
 
     model.ClearSelection2(True)
@@ -1059,71 +1039,106 @@ def execute_fillet(model: Any, op: FilletOperation) -> Any:
             else [radius_m, radius_m * 0.96]
         )
 
-        for r_try in radii_to_try:
+        version_info = get_connected_version_info()
+        consts = get_connected_constants()
+
+        def _select_candidate_edges() -> None:
             model.ClearSelection2(True)
             for edge in candidate_edges:
                 select_entity(model, edge, append=True, mark=1)
-            model.FeatureFillet(float(r_try), False, False, False, 0)
-            after_name, _ = get_last_solid_feature_name(model)
-            if after_name != target_feat_name:
+
+        for r_try in radii_to_try:
+            created_name = call_fillet(
+                model=model,
+                version_info=version_info,
+                consts=consts,
+                prepare_selection=_select_candidate_edges,
+                radius_m=float(r_try),
+                propagate=False,
+                get_last_feature_name=get_last_solid_feature_name,
+                prev_feat_name=target_feat_name,
+            )
+            if created_name:
                 model.ClearSelection2(True)
-                return after_name
+                return created_name
 
     # Modo 'last_feature' o 'all'
-    _select_edges_of_last_feature(model, target_feat_name)
+    version_info = get_connected_version_info()
+    consts = get_connected_constants()
+
+    def _select_last_feat_edges() -> None:
+        _select_edges_of_last_feature(model, target_feat_name)
+
     for r_try in (radius_m, radius_m * 0.96):
-        model.FeatureFillet(
-            float(r_try),     # 1. R1: radio en metros
-            True,             # 2. Propagate: propagación tangente
-            False,            # 3. Ftyp: radio constante
-            False,            # 4. VarRadTyp
-            0,                # 5. OverflowType (0 = default)
+        created_name = call_fillet(
+            model=model,
+            version_info=version_info,
+            consts=consts,
+            prepare_selection=_select_last_feat_edges,
+            radius_m=float(r_try),
+            propagate=True,
+            get_last_feature_name=get_last_solid_feature_name,
+            prev_feat_name=target_feat_name,
         )
-        after_name, _ = get_last_solid_feature_name(model)
-        if after_name != target_feat_name:
+        if created_name:
             model.ClearSelection2(True)
-            return after_name
+            return created_name
 
-    model.ClearSelection2(True)
-    select_by_id(model, target_feat_name, "BODYFEATURE", 0.0, 0.0, 0.0, append=False, mark=1)
-    model.FeatureFillet(float(radius_m), True, False, False, 0)
-    after_name, _ = get_last_solid_feature_name(model)
+    def _select_body_feature() -> None:
+        model.ClearSelection2(True)
+        select_by_id(model, target_feat_name, "BODYFEATURE", 0.0, 0.0, 0.0, append=False, mark=1)
 
-    if after_name == target_feat_name:
+    created_name = call_fillet(
+        model=model,
+        version_info=version_info,
+        consts=consts,
+        prepare_selection=_select_body_feature,
+        radius_m=float(radius_m),
+        propagate=True,
+        get_last_feature_name=get_last_solid_feature_name,
+        prev_feat_name=target_feat_name,
+    )
+
+    if not created_name:
         raise RuntimeError(
-            f"Falló FeatureFillet ({op.radius_mm} mm, edges='{op.edges}') sobre la operación '{target_feat_name}'."
+            f"Falló el redondeo ({op.radius_mm} mm, edges='{op.edges}') sobre la operación '{target_feat_name}'."
         )
 
     model.ClearSelection2(True)
-    return after_name
+    return created_name
 
 
 def execute_chamfer(model: Any, op: ChamferOperation) -> Any:
     """
-    Ejecuta un chaflán de distancia y ángulo (IModelDoc2.FeatureChamfer) sobre las aristas
-    de la última operación 3D creada.
-    Nota: IModelDoc2.FeatureChamfer retorna VT_VOID (None en COM), por lo que se verifica
-    su creación comparando la última operación 3D en el FeatureManager.
+    Ejecuta un chaflán de distancia y ángulo compatible con SOLIDWORKS 2017–2026+
+    (IFeatureManager::InsertFeatureChamfer con fallback a IModelDoc2::FeatureChamfer)
+    sobre las aristas de la última operación 3D creada.
     """
     target_feat_name, _ = get_last_solid_feature_name(model)
     width_m = mm_to_m(op.distance_mm)
     angle_rad = math.radians(float(op.angle_deg))
+    consts = get_connected_constants()
 
-    _select_edges_of_last_feature(model, target_feat_name)
-    model.FeatureChamfer(
-        float(width_m),    # 1. Width (metros)
-        float(angle_rad),  # 2. Angle (radianes)
-        False,             # 3. Flip
+    def _select_chamfer_edges() -> None:
+        _select_edges_of_last_feature(model, target_feat_name)
+
+    created_name = call_chamfer(
+        model=model,
+        consts=consts,
+        prepare_selection=_select_chamfer_edges,
+        width_m=float(width_m),
+        angle_rad=float(angle_rad),
+        get_last_feature_name=get_last_solid_feature_name,
+        prev_feat_name=target_feat_name,
     )
 
-    after_name, _ = get_last_solid_feature_name(model)
-    if after_name == target_feat_name:
+    if not created_name:
         raise RuntimeError(
-            f"Falló FeatureChamfer ({op.distance_mm} mm x {op.angle_deg}°) sobre '{target_feat_name}'."
+            f"Falló el chaflán ({op.distance_mm} mm x {op.angle_deg}°) sobre '{target_feat_name}'."
         )
 
     model.ClearSelection2(True)
-    return after_name
+    return created_name
 
 
 def execute_shell(model: Any, op: ShellOperation) -> Any:
@@ -1186,7 +1201,7 @@ def execute_shell(model: Any, op: ShellOperation) -> Any:
         )
 
     thickness_m = mm_to_m(op.thickness_mm)
-    model.InsertFeatureShell(float(thickness_m), bool(op.outward))
+    call_shell(model, float(thickness_m), bool(op.outward))
 
     after_name, _ = get_last_solid_feature_name(model)
     if after_name == prev_feat_name:
@@ -1287,28 +1302,34 @@ def _try_insert_wrap_feature(
     if selected_faces == 0:
         return None
 
-    return model.FeatureManager.InsertWrapFeature2(
-        int(wrap_type),
-        float(thickness_m),
-        bool(reverse_dir),
-        int(method),
-        5,
+    return call_wrap(
+        feat_mgr=model.FeatureManager,
+        version_info=get_connected_version_info(),
+        wrap_type=int(wrap_type),
+        thickness_m=float(thickness_m),
+        reverse_dir=bool(reverse_dir),
+        method=int(method),
+        mesh_factor=5,
     )
 
 
 def execute_wrap(model: Any, op: WrapOperation) -> Any:
     """
-    Ejecuta una operación de envoltura (IFeatureManager::InsertWrapFeature2) sobre una cara cilíndrica.
+    Ejecuta una operación de envoltura (InsertWrapFeature2 en SW 2017–2026+, con fallback
+    a InsertWrapFeature en versiones anteriores) sobre una cara cilíndrica.
     Soporta modos 'deboss'/'engrave', 'emboss' y 'scribe', probando Analytical y SplineSurface.
     """
+    consts = get_connected_constants()
     wrap_type_map: dict[str, int] = {
-        "emboss": SW_WRAP_TYPE_EMBOSS,
-        "deboss": SW_WRAP_TYPE_ENGRAVE,
-        "engrave": SW_WRAP_TYPE_ENGRAVE,
-        "scribe": SW_WRAP_TYPE_SCRIBE,
+        "emboss": int(consts.swWrapSketchType_Emboss),
+        "deboss": int(consts.swWrapSketchType_Engrave),
+        "engrave": int(consts.swWrapSketchType_Engrave),
+        "scribe": int(consts.swWrapSketchType_Scribe),
     }
     wrap_type = wrap_type_map[op.mode]
     thickness_m = mm_to_m(op.depth_mm)
+    method_analytical = int(consts.swWrapMethods_Analytical)
+    method_spline = int(consts.swWrapMethods_SplineSurface)
 
     sketch_name = build_sketch_on_plane(
         model,
@@ -1326,14 +1347,14 @@ def execute_wrap(model: Any, op: WrapOperation) -> Any:
 
     rev_primary = bool(op.reverse_dir)
     attempts: list[tuple[list[Any], int, bool]] = [
-        ([best_face], SW_WRAP_METHOD_ANALYTICAL, rev_primary),
-        ([best_face], SW_WRAP_METHOD_SPLINE_SURFACE, rev_primary),
-        ([best_face], SW_WRAP_METHOD_ANALYTICAL, not rev_primary),
-        ([best_face], SW_WRAP_METHOD_SPLINE_SURFACE, not rev_primary),
+        ([best_face], method_analytical, rev_primary),
+        ([best_face], method_spline, rev_primary),
+        ([best_face], method_analytical, not rev_primary),
+        ([best_face], method_spline, not rev_primary),
     ]
     if len(same_radius_faces) > 1:
-        attempts.append((same_radius_faces, SW_WRAP_METHOD_SPLINE_SURFACE, rev_primary))
-        attempts.append((same_radius_faces, SW_WRAP_METHOD_SPLINE_SURFACE, not rev_primary))
+        attempts.append((same_radius_faces, method_spline, rev_primary))
+        attempts.append((same_radius_faces, method_spline, not rev_primary))
 
     feat = None
     for target_faces, method, rev_dir in attempts:
@@ -1456,18 +1477,29 @@ def _optimize_operation_order(operations: list[OperationType]) -> list[Operation
 
 def build_part(part: CADPart) -> Any:
     """
-    Orquesta la construcción completa de una pieza CADPart en SolidWorks 2018:
-    - Conecta a SolidWorks 2018 y abre una pieza limpia.
-    - Desactiva temporalmente swInputDimValOnCreate (enum 10) y swSketchInference (enum 249).
+    Orquesta la construcción completa de una pieza CADPart en SOLIDWORKS (2017–2026+):
+    - Conecta a SOLIDWORKS, detecta versión/idioma y carga constantes desde swconst.tlb.
+    - Abre una pieza limpia verificando plantilla .prtdot existente en disco.
+    - Desactiva temporalmente swInputDimValOnCreate y swSketchInference (restaurando ambos al finalizar).
     - Optimiza el orden de cortes pasantes antes de cortes parciales para evitar espesor cero en (0,0).
     - Ejecuta secuencialmente cada croquis y operación 3D imprimiendo telemetría detallada.
-    - Restaura las preferencias del usuario y ajusta la vista isométrica.
+    - Reconstruye el modelo y ajusta la vista isométrica independientemente del idioma.
     """
     sw_app = connect_to_solidworks()
+    version_info = get_connected_version_info()
+    adapter = get_connected_adapter()
+    consts = get_connected_constants()
+    lang_info = f", idioma: {version_info.language}" if version_info.language else ""
+    print(
+        f"[INFO] Conectado a {version_info.display_name}{lang_info} "
+        f"[adaptador: {adapter.name}, constantes: {consts.source}]"
+    )
+
     model = create_new_part(sw_app)
 
     ordered_ops = _optimize_operation_order(part.operations)
-    prev_dim_toggle = set_input_dim_on_create(sw_app, False)
+    prev_dim_toggle, prev_inf_toggle = get_sketch_ui_preferences(sw_app)
+    set_input_dim_on_create(sw_app, False)
     prev_op: Optional[OperationType] = None
     try:
         for idx, operation in enumerate(ordered_ops, start=1):
@@ -1477,13 +1509,20 @@ def build_part(part: CADPart) -> Any:
             print(f"     [OK] Operación {idx} completada -> última feature en árbol: '{last_name}' ({last_type})")
             prev_op = operation
     finally:
-        # Restaurar las preferencias de cota e inferencia para que la UI quede 100% normal al editar
-        set_input_dim_on_create(sw_app, True if prev_dim_toggle else True)
+        # Restaurar las preferencias exactas de cota e inferencia que tenía el usuario
+        restore_sketch_ui_preferences(sw_app, prev_dim_toggle, prev_inf_toggle)
 
-    # Reconstruir modelo y encuadrar en vista isométrica
+    # Reconstruir modelo y encuadrar en vista isométrica (primero por ViewId independiente del idioma)
     com_call_0(model, "EditRebuild3")
     model.ClearSelection2(True)
-    model.ShowNamedView2("*Isometric", SW_VIEW_ISOMETRIC)
+    iso_view_id = int(consts.swIsometricView)
+    try:
+        model.ShowNamedView2("", iso_view_id)
+    except Exception:
+        try:
+            model.ShowNamedView2("*Isometric", iso_view_id)
+        except Exception:
+            pass
     com_call_0(model, "ViewZoomtofit2")
     return model
 

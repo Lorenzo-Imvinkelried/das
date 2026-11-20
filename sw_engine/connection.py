@@ -1,19 +1,74 @@
+import glob
 import os
-from typing import Any
+import re
+import sys
+from typing import Any, Optional
+
 import pythoncom
 import win32com.client
 
-# Constantes de preferencias de SolidWorks 2018 (verificadas en swconst.tlb)
-SW_FILE_LOCATIONS_DOC_TEMPLATES = 6  # swUserPreferenceStringValue_e.swFileLocationsDocumentTemplates
-SW_DEFAULT_TEMPLATE_PART = 8         # swUserPreferenceStringValue_e.swDefaultTemplatePart
-SW_INPUT_DIM_VAL_ON_CREATE = 10      # swUserPreferenceToggle_e.swInputDimValOnCreate
-SW_SKETCH_INFERENCE = 249            # swUserPreferenceToggle_e.swSketchInference
+from .compat import (
+    SUPPORTED_SW_MAX_YEAR,
+    SUPPORTED_SW_MIN_YEAR,
+    SolidWorksVersionInfo,
+    SwConstants,
+    detect_solidworks_version,
+    diagnose_com_connection_error,
+    get_empty_double_array_variant,
+    list_installed_solidworks_versions,
+    load_sw_constants,
+    year_to_major,
+)
+from .versions import SolidWorksVersionAdapter, get_version_adapter
 
-# Mapeo multilenguaje (Español -> Inglés) para planos base de SolidWorks
+# Constantes por defecto (se mantienen por retrocompatibilidad; en tiempo de ejecución
+# se usan las resueltas dinámicamente desde swconst.tlb de la versión conectada)
+_DEFAULT_CONSTS = SwConstants()
+SW_FILE_LOCATIONS_DOC_TEMPLATES = _DEFAULT_CONSTS.swFileLocationsDocumentTemplates
+SW_DEFAULT_TEMPLATE_PART = _DEFAULT_CONSTS.swDefaultTemplatePart
+SW_INPUT_DIM_VAL_ON_CREATE = _DEFAULT_CONSTS.swInputDimValOnCreate
+SW_SKETCH_INFERENCE = _DEFAULT_CONSTS.swSketchInference
+
+# Constantes de planos de referencia (swRefPlaneReferenceConstraints_e)
+SW_REF_PLANE_DISTANCE = _DEFAULT_CONSTS.swRefPlaneReferenceConstraint_Distance
+SW_REF_PLANE_OPTION_FLIP = _DEFAULT_CONSTS.swRefPlaneReferenceConstraint_OptionFlip
+
+# Estado de la sesión COM activa (versión detectada, adaptador por versión y constantes de swconst.tlb)
+_ACTIVE_VERSION_INFO: SolidWorksVersionInfo = SolidWorksVersionInfo()
+_ACTIVE_ADAPTER: SolidWorksVersionAdapter = get_version_adapter(_ACTIVE_VERSION_INFO)
+_ACTIVE_CONSTANTS: SwConstants = _DEFAULT_CONSTS
+
+# Mapeo multilenguaje (Español, Inglés, Portugués, Alemán, Francés, Italiano) para planos base.
+# Si la plantilla usa cualquier otro idioma/nombre personalizado, select_reference_plane cae al
+# fallback por orden de RefPlane (0, 1, 2) en el árbol del FeatureManager.
 PLANE_NAMES_MAP: dict[str, list[str]] = {
-    "Front": ["Alzado", "Front Plane", "Plano frontal"],
-    "Top": ["Planta", "Top Plane", "Plano superior"],
-    "Right": ["Vista lateral", "Right Plane", "Plano derecho"],
+    "Front": [
+        "Alzado",
+        "Front Plane",
+        "Plano frontal",
+        "Plano Frontal",
+        "Ebene vorne",
+        "Plan de face",
+        "Piano frontale",
+    ],
+    "Top": [
+        "Planta",
+        "Top Plane",
+        "Plano superior",
+        "Plano Superior",
+        "Ebene oben",
+        "Plan de dessus",
+        "Piano superiore",
+    ],
+    "Right": [
+        "Vista lateral",
+        "Right Plane",
+        "Plano derecho",
+        "Plano Direito",
+        "Ebene rechts",
+        "Plan de droite",
+        "Piano destro",
+    ],
 }
 
 PLANE_INDEX_MAP: dict[str, int] = {
@@ -22,22 +77,84 @@ PLANE_INDEX_MAP: dict[str, int] = {
     "Right": 2,
 }
 
+# Mapeo de ejes principales a la intersección de dos planos base ortogonales
+AXIS_PLANES_MAP: dict[str, tuple[str, str]] = {
+    "Y": ("Front", "Right"),  # Eje vertical Y (intersección Alzado + Vista lateral)
+    "Z": ("Top", "Right"),    # Eje longitudinal Z (intersección Planta + Vista lateral)
+    "X": ("Front", "Top"),    # Eje horizontal X (intersección Alzado + Planta)
+}
+
+# Tipos de elementos del árbol del FeatureManager que NO son operaciones 3D sólidas
+NON_SOLID_FEATURE_TYPES: set[str] = {
+    "OriginProfileFeature",
+    "RefPlane",
+    "RefAxis",
+    "RefPoint",
+    "CoordSys",
+    "ProfileFeature",
+    "3DProfileFeature",
+    "HistoryFolder",
+    "SensorFolder",
+    "DetailCabinet",
+    "MaterialFolder",
+    "CommentsFolder",
+    "FavoriteFolder",
+    "SelectionSetFolder",
+    "DocsFolder",
+    "EqnFolder",
+    "SolidBodyFolder",
+    "SurfaceBodyFolder",
+    "CutListFolder",
+    "SubWeldFolder",
+    "AmbientLight",
+    "DirectionLight",
+}
+
+# Nombres prioritarios de plantilla de pieza (.prtdot) en múltiples idiomas
+PREFERRED_PART_TEMPLATE_NAMES: tuple[str, ...] = (
+    "Part.prtdot",
+    "part.prtdot",
+    "Pieza.prtdot",
+    "pieza.prtdot",
+    "Peça.prtdot",
+    "Peca.prtdot",
+    "Teil.prtdot",
+    "Pièce.prtdot",
+    "Piece.prtdot",
+    "Parte.prtdot",
+)
+
+
+def get_connected_version_info() -> SolidWorksVersionInfo:
+    """Devuelve los metadatos de la última instancia de SOLIDWORKS conectada."""
+    return _ACTIVE_VERSION_INFO
+
+
+def get_connected_adapter() -> SolidWorksVersionAdapter:
+    """Devuelve el adaptador de comandos correspondiente a la versión de SOLIDWORKS conectada."""
+    return _ACTIVE_ADAPTER
+
+
+def get_connected_constants() -> SwConstants:
+    """Devuelve las constantes swconst activas (cargadas desde swconst.tlb si estuvo disponible)."""
+    return _ACTIVE_CONSTANTS
+
 
 def mm_to_m(value_mm: float) -> float:
-    """Convierte milímetros a metros (unidad interna obligatoria de la API de SolidWorks)."""
+    """Convierte milímetros a metros (unidad interna obligatoria de la API de SOLIDWORKS)."""
     return float(value_mm) / 1000.0
 
 
 def get_null_dispatch() -> win32com.client.VARIANT:
-    """Devuelve un puntero COM IDispatch nulo seguro para SolidWorks 2018 (evita Type Mismatch)."""
+    """Devuelve un puntero COM IDispatch nulo seguro para SOLIDWORKS (evita Type Mismatch)."""
     return win32com.client.VARIANT(pythoncom.VT_DISPATCH, None)
 
 
 def com_call_0(obj: Any, member_name: str) -> Any:
     """
-    Invoca de forma segura un método o propiedad de 0 argumentos en SolidWorks 2018 (pywin32).
+    Invoca de forma segura un método o propiedad de 0 argumentos en SOLIDWORKS (pywin32).
     En late-binding (CDispatch), hacer getattr(obj, nombre) envía INVOKE_PROPERTYGET con 0 args,
-    lo cual hace que SolidWorks ejecute el método inmediatamente y devuelva el resultado
+    lo cual hace que SOLIDWORKS ejecute el método inmediatamente y devuelva el resultado
     (un CDispatch, str, bool o None). Llamar luego a () sobre un CDispatch invoca DISPID 0
     y lanza (-2147352573, 'No se ha encontrado el miembro.').
     """
@@ -75,44 +192,6 @@ def select_by_id(
     )
 
 
-# Constantes de planos de referencia (swRefPlaneReferenceConstraints_e)
-SW_REF_PLANE_DISTANCE = 8       # swRefPlaneReferenceConstraint_Distance
-SW_REF_PLANE_OPTION_FLIP = 256  # swRefPlaneReferenceConstraint_OptionFlip
-
-# Mapeo de ejes principales a la intersección de dos planos base ortogonales
-AXIS_PLANES_MAP: dict[str, tuple[str, str]] = {
-    "Y": ("Front", "Right"),  # Eje vertical Y (intersección Alzado + Vista lateral)
-    "Z": ("Top", "Right"),    # Eje longitudinal Z (intersección Planta + Vista lateral)
-    "X": ("Front", "Top"),    # Eje horizontal X (intersección Alzado + Planta)
-}
-
-# Tipos de elementos del árbol del FeatureManager que NO son operaciones 3D sólidas
-NON_SOLID_FEATURE_TYPES: set[str] = {
-    "OriginProfileFeature",
-    "RefPlane",
-    "RefAxis",
-    "RefPoint",
-    "CoordSys",
-    "ProfileFeature",
-    "3DProfileFeature",
-    "HistoryFolder",
-    "SensorFolder",
-    "DetailCabinet",
-    "MaterialFolder",
-    "CommentsFolder",
-    "FavoriteFolder",
-    "SelectionSetFolder",
-    "DocsFolder",
-    "EqnFolder",
-    "SolidBodyFolder",
-    "SurfaceBodyFolder",
-    "CutListFolder",
-    "SubWeldFolder",
-    "AmbientLight",
-    "DirectionLight",
-}
-
-
 def select_reference_plane(
     model: Any,
     plane: str = "Front",
@@ -120,9 +199,9 @@ def select_reference_plane(
     mark: int = 0,
 ) -> bool:
     """
-    Selecciona el plano base soportando SolidWorks en Español e Inglés.
-    Intenta primero el nombre en español ('Alzado', 'Planta', 'Vista lateral') y
-    si devuelve False intenta con el nombre en inglés ('Front Plane', 'Top Plane', 'Right Plane').
+    Selecciona el plano base soportando SOLIDWORKS en cualquier idioma.
+    Intenta primero por nombres conocidos (ES/EN/PT/DE/FR/IT) y si devuelve False
+    recorre los primeros RefPlane del árbol del FeatureManager por índice (0, 1, 2).
     """
     candidates = PLANE_NAMES_MAP.get(plane, [plane])
     if not append:
@@ -132,7 +211,7 @@ def select_reference_plane(
         if select_by_id(model, candidate_name, "PLANE", 0.0, 0.0, 0.0, append=append, mark=mark):
             return True
 
-    # Fallback: buscar por orden de RefPlane en el árbol del FeatureManager si la plantilla usa otros nombres
+    # Fallback universal independiente del idioma: buscar por orden de RefPlane en el árbol
     target_idx = PLANE_INDEX_MAP.get(plane, 0)
     ref_plane_idx = 0
     feat = com_call_0(model, "FirstFeature")
@@ -152,11 +231,14 @@ def select_or_create_plane(model: Any, plane: str = "Front", offset_mm: float = 
     Selecciona el plano base indicado o, si offset_mm != 0, crea un plano de referencia
     paralelo desfasado (InsertRefPlane) y lo deja seleccionado para abrir el croquis.
     """
+    consts = get_connected_constants()
     select_reference_plane(model, plane, append=False, mark=0)
     if abs(offset_mm) <= 1e-6:
         return plane
 
-    constraint = SW_REF_PLANE_DISTANCE if offset_mm > 0 else (SW_REF_PLANE_DISTANCE | SW_REF_PLANE_OPTION_FLIP)
+    dist_flag = int(consts.swRefPlaneReferenceConstraint_Distance)
+    flip_flag = int(consts.swRefPlaneReferenceConstraint_OptionFlip)
+    constraint = dist_flag if offset_mm > 0 else (dist_flag | flip_flag)
     distance_m = mm_to_m(abs(offset_mm))
 
     ref_plane_feat = model.FeatureManager.InsertRefPlane(
@@ -234,7 +316,7 @@ def select_entity(
     mark: int = 1,
 ) -> bool:
     """
-    Selecciona una entidad geométrica COM (IFace2, IEdge, etc.) en SolidWorks 2018.
+    Selecciona una entidad geométrica COM (IFace2, IEdge, etc.) en SOLIDWORKS.
     En late-binding (pywin32), IFace2 e IEdge no exponen directamente IEntity.Select2(),
     por lo que se utiliza SelectionManager.AddSelectionListObject con CreateSelectData().
     """
@@ -275,41 +357,169 @@ def get_last_solid_feature_name(model: Any) -> tuple[str, str]:
 
     if not last_name:
         raise RuntimeError(
-            "No se encontró una operación 3D previa en el árbol para aplicar la matriz."
+            "No se encontró una operación 3D previa en el árbol para aplicar la operación."
         )
     return last_name, last_type
 
 
-def connect_to_solidworks() -> Any:
-    """Conecta con la instancia activa de SolidWorks 2018 (o la inicia si no está abierta)."""
-    pythoncom.CoInitialize()
-    try:
-        try:
-            sw_app = win32com.client.GetActiveObject("SldWorks.Application")
-        except Exception:
-            sw_app = win32com.client.Dispatch("SldWorks.Application")
-        sw_app.Visible = True
-        return sw_app
-    except Exception as exc:
+def connect_to_solidworks(preferred_year: Optional[int] = None) -> Any:
+    """
+    Conecta con la instancia activa de SOLIDWORKS (2017–2026+) o la inicia si no está abierta.
+    - Prioriza la instancia ya abierta en la sesión del usuario (GetActiveObject).
+    - Si preferred_year se indica (ej. 2024), prioriza SldWorks.Application.<major>.
+    - Si el ProgID genérico falla, prueba los ProgIDs versionados instalados en el Registro.
+    - Detecta automáticamente versión, idioma y carga swconst.tlb de la instalación activa.
+    """
+    global _ACTIVE_VERSION_INFO, _ACTIVE_ADAPTER, _ACTIVE_CONSTANTS
+
+    if sys.platform != "win32":
         raise RuntimeError(
-            "No se pudo conectar con 'SldWorks.Application'. "
-            f"Asegúrate de tener SolidWorks 2018 abierto en tu sesión de escritorio. Detalle COM: {exc}"
-        ) from exc
+            "La conexión COM en vivo con SOLIDWORKS solo está disponible en Windows."
+        )
+
+    pythoncom.CoInitialize()
+
+    installed_versions = list_installed_solidworks_versions()
+    prog_ids: list[str] = []
+    if preferred_year is not None:
+        pref_major = year_to_major(preferred_year)
+        if pref_major > 0:
+            prog_ids.append(f"SldWorks.Application.{pref_major}")
+    if "SldWorks.Application" not in prog_ids:
+        prog_ids.append("SldWorks.Application")
+    for _, _, ver_prog_id in installed_versions:
+        if ver_prog_id not in prog_ids:
+            prog_ids.append(ver_prog_id)
+
+    sw_app = None
+    used_prog_id = "SldWorks.Application"
+    last_exc: Optional[Exception] = None
+
+    # 1. Intentar engancharse primero a cualquier instancia ya abierta (ROT)
+    for pid in prog_ids:
+        try:
+            sw_app = win32com.client.GetActiveObject(pid)
+            used_prog_id = pid
+            break
+        except Exception as exc:
+            last_exc = exc
+
+    # 2. Si no había ninguna abierta, lanzar SOLIDWORKS vía Dispatch
+    if sw_app is None:
+        for pid in prog_ids:
+            try:
+                sw_app = win32com.client.Dispatch(pid)
+                used_prog_id = pid
+                break
+            except Exception as exc:
+                last_exc = exc
+
+    if sw_app is None:
+        hint = diagnose_com_connection_error(last_exc) if last_exc is not None else ""
+        installed_str = (
+            ", ".join(f"SW {y} ({p})" for y, _, p in installed_versions)
+            if installed_versions
+            else "ninguna detectada en HKCR"
+        )
+        raise RuntimeError(
+            f"No se pudo conectar con SOLIDWORKS ({used_prog_id}). {hint} "
+            f"[Versiones registradas: {installed_str}] [Detalle COM: {last_exc}]"
+        ) from last_exc
+
+    try:
+        sw_app.Visible = True
+    except Exception:
+        pass
+
+    version_info = detect_solidworks_version(sw_app, prog_id=used_prog_id)
+    adapter = get_version_adapter(version_info)
+    consts = load_sw_constants(version_info)
+    _ACTIVE_VERSION_INFO = version_info
+    _ACTIVE_ADAPTER = adapter
+    _ACTIVE_CONSTANTS = consts
+
+    if not version_info.is_supported_range:
+        print(
+            f"[AVISO] Versión detectada {version_info.display_name} es anterior al rango "
+            f"garantizado ({SUPPORTED_SW_MIN_YEAR}–{SUPPORTED_SW_MAX_YEAR}). "
+            "Se usarán comandos de respaldo cuando existan."
+        )
+
+    return sw_app
 
 
-def resolve_valid_part_template(sw_app: Any) -> str:
+def _discover_dynamic_template_dirs(version_info: Optional[SolidWorksVersionInfo] = None) -> list[str]:
+    """
+    Descubre dinámicamente carpetas de plantillas de SOLIDWORKS en el equipo para cualquier versión
+    (2017–2026+) e idioma, sin rutas hardcodeadas a un año ni disco específico.
+    """
+    discovered: list[str] = []
+
+    def _add_if_dir(path: str) -> None:
+        if path and os.path.isdir(path) and path not in discovered:
+            discovered.append(path)
+
+    program_data = os.environ.get("PROGRAMDATA", r"C:\ProgramData")
+
+    # 1. Priorizar la carpeta ProgramData definida por el adaptador de la versión conectada
+    adapter = get_version_adapter(version_info)
+    if version_info and version_info.year > 0:
+        if adapter.TEMPLATE_SUBDIR and adapter.YEAR == version_info.year:
+            _add_if_dir(os.path.join(program_data, adapter.TEMPLATE_SUBDIR))
+        _add_if_dir(
+            os.path.join(program_data, "SOLIDWORKS", f"SOLIDWORKS {version_info.year}", "templates")
+        )
+
+    # 2. Escanear todas las carpetas C:\ProgramData\SOLIDWORKS\SOLIDWORKS *\templates (más reciente primero)
+    pattern = os.path.join(program_data, "SOLIDWORKS", "SOLIDWORKS *", "templates")
+
+    def _year_sort_key(folder_path: str) -> int:
+        match = re.search(r"SOLIDWORKS\s+(\d{4})", folder_path, flags=re.IGNORECASE)
+        return int(match.group(1)) if match else 0
+
+    for tpl_dir in sorted(glob.glob(pattern), key=_year_sort_key, reverse=True):
+        _add_if_dir(tpl_dir)
+
+    # 3. Directorios dentro de la instalación activa obtenida de ISldWorks::GetExecutablePath
+    exe_dir = version_info.executable_dir if version_info else ""
+    if exe_dir and os.path.isdir(exe_dir):
+        langs_to_check: list[str] = []
+        if version_info and version_info.language:
+            langs_to_check.append(version_info.language)
+        for fallback_lang in ("english", "spanish", "portuguese-brazilian", "german", "french", "italian"):
+            if fallback_lang not in langs_to_check:
+                langs_to_check.append(fallback_lang)
+
+        for lang_name in langs_to_check:
+            _add_if_dir(os.path.join(exe_dir, "lang", lang_name, "Tutorial"))
+            _add_if_dir(os.path.join(exe_dir, "lang", lang_name))
+        _add_if_dir(os.path.join(exe_dir, "data", "templates"))
+
+    return discovered
+
+
+def resolve_valid_part_template(
+    sw_app: Any,
+    version_info: Optional[SolidWorksVersionInfo] = None,
+    consts: Optional[SwConstants] = None,
+) -> str:
     """
     Obtiene una ruta válida y existente en disco hacia una plantilla de pieza (.prtdot).
-    IMPORTANTE: En instalaciones de SolidWorks 2018 con idioma Español sobre plantillas en Inglés,
-    swDefaultTemplatePart (8) suele apuntar a 'Pieza.prtdot' (que NO existe en disco), mientras
+    IMPORTANTE: En instalaciones de SOLIDWORKS con interfaz en Español sobre plantillas en Inglés,
+    swDefaultTemplatePart suele apuntar a 'Pieza.prtdot' (que NO existe en disco), mientras
     que el archivo real es 'Part.prtdot'. Si se llama a NewPart() o NewDocument() con una plantilla
-    inexistente, SolidWorks crea una pieza corrupta sin estilos de cota (puntero NULL en 0x0)
-    que crashea en slduiu.dll (016A3C00) apenas el usuario toca Cota Inteligente.
+    inexistente, SOLIDWORKS crea una pieza corrupta sin estilos de cota (puntero NULL en 0x0)
+    que crashea en slduiu.dll apenas el usuario toca Cota Inteligente.
     """
+    active_consts = consts or get_connected_constants()
+    active_version = version_info or get_connected_version_info()
+    pref_default_part = int(active_consts.swDefaultTemplatePart)
+    pref_doc_templates = int(active_consts.swFileLocationsDocumentTemplates)
+
     search_dirs: list[str] = []
 
     try:
-        pref_template = str(sw_app.GetUserPreferenceStringValue(SW_DEFAULT_TEMPLATE_PART) or "").strip()
+        pref_template = str(sw_app.GetUserPreferenceStringValue(pref_default_part) or "").strip()
         if pref_template:
             if os.path.isfile(pref_template):
                 return pref_template
@@ -320,7 +530,7 @@ def resolve_valid_part_template(sw_app: Any) -> str:
         pass
 
     try:
-        tpl_folders = str(sw_app.GetUserPreferenceStringValue(SW_FILE_LOCATIONS_DOC_TEMPLATES) or "")
+        tpl_folders = str(sw_app.GetUserPreferenceStringValue(pref_doc_templates) or "")
         for folder in tpl_folders.split(";"):
             folder = folder.strip()
             if folder and os.path.isdir(folder) and folder not in search_dirs:
@@ -328,33 +538,28 @@ def resolve_valid_part_template(sw_app: Any) -> str:
     except Exception:
         pass
 
-    fallback_dirs = [
-        r"C:\ProgramData\SOLIDWORKS\SOLIDWORKS 2018\templates",
-        r"D:\SW\SOLIDWORKS\lang\english\Tutorial",
-    ]
-    for d in fallback_dirs:
-        if os.path.isdir(d) and d not in search_dirs:
-            search_dirs.append(d)
+    for dyn_dir in _discover_dynamic_template_dirs(active_version):
+        if dyn_dir not in search_dirs:
+            search_dirs.append(dyn_dir)
 
-    preferred_names = ["Part.prtdot", "part.prtdot", "Pieza.prtdot", "pieza.prtdot"]
     for directory in search_dirs:
-        for name in preferred_names:
+        for name in PREFERRED_PART_TEMPLATE_NAMES:
             candidate = os.path.join(directory, name)
             if os.path.isfile(candidate):
                 try:
-                    sw_app.SetUserPreferenceStringValue(SW_DEFAULT_TEMPLATE_PART, candidate)
+                    sw_app.SetUserPreferenceStringValue(pref_default_part, candidate)
                 except Exception:
                     pass
                 return candidate
 
-        # Si tiene otro nombre, tomar cualquier .prtdot válido del directorio
+        # Si tiene otro nombre (ej. plantilla corporativa), tomar cualquier .prtdot válido del directorio
         try:
-            for entry in os.listdir(directory):
+            for entry in sorted(os.listdir(directory)):
                 if entry.lower().endswith(".prtdot"):
                     candidate = os.path.join(directory, entry)
                     if os.path.isfile(candidate):
                         try:
-                            sw_app.SetUserPreferenceStringValue(SW_DEFAULT_TEMPLATE_PART, candidate)
+                            sw_app.SetUserPreferenceStringValue(pref_default_part, candidate)
                         except Exception:
                             pass
                         return candidate
@@ -366,7 +571,7 @@ def resolve_valid_part_template(sw_app: Any) -> str:
 
 def create_new_part(sw_app: Any) -> Any:
     """
-    Crea un documento de pieza nuevo en SolidWorks 2018 garantizando el uso de una
+    Crea un documento de pieza nuevo en SOLIDWORKS garantizando el uso de una
     plantilla .prtdot existente en disco (evita documentos sin estilos de acotación).
     """
     model = None
@@ -379,7 +584,7 @@ def create_new_part(sw_app: Any) -> Any:
         except Exception:
             model = None
 
-    # 2. Respaldo con NewPart (ahora con swDefaultTemplatePart ya corregido si existía plantilla)
+    # 2. Respaldo con NewPart (con swDefaultTemplatePart ya corregido si existía plantilla)
     if model is None:
         try:
             model = com_call_0(sw_app, "NewPart")
@@ -391,25 +596,60 @@ def create_new_part(sw_app: Any) -> Any:
         model = com_call_0(sw_app, "ActiveDoc")
 
     if model is None:
+        ver_label = get_connected_version_info().display_name
         raise RuntimeError(
-            "No se pudo crear una pieza nueva en SolidWorks 2018. "
-            "Verifica que exista una plantilla .prtdot y que no haya ningún cuadro de diálogo modal abierto."
+            f"No se pudo crear una pieza nueva en {ver_label}. "
+            "Verifica que exista una plantilla .prtdot en Opciones -> Plantillas predeterminadas "
+            "y que no haya ningún cuadro de diálogo modal abierto."
         )
 
     return model
 
 
+def get_sketch_ui_preferences(sw_app: Any) -> tuple[bool, bool]:
+    """Lee el estado actual de (swInputDimValOnCreate, swSketchInference) en SOLIDWORKS."""
+    consts = get_connected_constants()
+    prev_dim = True
+    prev_inf = True
+    try:
+        prev_dim = bool(sw_app.GetUserPreferenceToggle(int(consts.swInputDimValOnCreate)))
+    except Exception:
+        prev_dim = True
+    try:
+        prev_inf = bool(sw_app.GetUserPreferenceToggle(int(consts.swSketchInference)))
+    except Exception:
+        prev_inf = True
+    return prev_dim, prev_inf
+
+
+def restore_sketch_ui_preferences(
+    sw_app: Any,
+    input_dim_enabled: bool,
+    sketch_inference_enabled: bool,
+) -> None:
+    """Restaura independientemente swInputDimValOnCreate y swSketchInference a su estado previo."""
+    consts = get_connected_constants()
+    try:
+        sw_app.SetUserPreferenceToggle(int(consts.swInputDimValOnCreate), bool(input_dim_enabled))
+    except Exception:
+        pass
+    try:
+        sw_app.SetUserPreferenceToggle(int(consts.swSketchInference), bool(sketch_inference_enabled))
+    except Exception:
+        pass
+
+
 def set_input_dim_on_create(sw_app: Any, enabled: bool) -> bool:
     """
-    Activa o desactiva temporalmente swInputDimValOnCreate (enum 10) y swSketchInference (enum 249)
-    para evitar que SolidWorks abra cuadros de diálogo o haga inferencias erráticas al dibujar por API.
+    Activa o desactiva temporalmente swInputDimValOnCreate y swSketchInference
+    para evitar que SOLIDWORKS abra cuadros de diálogo o haga inferencias erráticas al dibujar por API.
     Devuelve el estado previo de swInputDimValOnCreate.
     """
-    prev_state = bool(sw_app.GetUserPreferenceToggle(SW_INPUT_DIM_VAL_ON_CREATE))
-    sw_app.SetUserPreferenceToggle(SW_INPUT_DIM_VAL_ON_CREATE, bool(enabled))
+    consts = get_connected_constants()
+    prev_state = bool(sw_app.GetUserPreferenceToggle(int(consts.swInputDimValOnCreate)))
+    sw_app.SetUserPreferenceToggle(int(consts.swInputDimValOnCreate), bool(enabled))
     try:
-        sw_app.SetUserPreferenceToggle(SW_SKETCH_INFERENCE, bool(enabled))
+        sw_app.SetUserPreferenceToggle(int(consts.swSketchInference), bool(enabled))
     except Exception:
         pass
     return prev_state
-

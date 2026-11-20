@@ -15,13 +15,14 @@ from schemas.cad_schema import (
 )
 from .connection import (
     com_call_0,
+    get_connected_constants,
     mm_to_m,
     select_by_id,
     select_or_create_plane,
 )
 
-# Constantes de ranura de croquis (swSketchSlotCreationType_e / swSketchSlotLengthType_e)
-SW_SLOT_TYPE_LINE = 0           # swSketchSlotCreationType_line (ranura recta)
+# Constantes de ranura de croquis (respaldos verificados; en ejecución usa swconst.tlb)
+SW_SLOT_TYPE_LINE = 0             # swSketchSlotCreationType_line (ranura recta)
 SW_SLOT_LENGTH_CENTER_CENTER = 0  # swSketchSlotLengthType_CenterCenter (distancia entre centros)
 
 
@@ -147,14 +148,15 @@ def draw_shape(sketch_mgr: Any, shape: ShapeType) -> Any:
         )
 
     if isinstance(shape, Slot):
+        consts = get_connected_constants()
         x1_m = mm_to_m(shape.x1)
         y1_m = mm_to_m(shape.y1)
         x2_m = mm_to_m(shape.x2)
         y2_m = mm_to_m(shape.y2)
         width_m = mm_to_m(shape.width)
         return sketch_mgr.CreateSketchSlot(
-            SW_SLOT_TYPE_LINE,
-            SW_SLOT_LENGTH_CENTER_CENTER,
+            int(consts.swSketchSlotCreationType_line),
+            int(consts.swSketchSlotLengthType_CenterCenter),
             width_m,
             x1_m,
             y1_m,
